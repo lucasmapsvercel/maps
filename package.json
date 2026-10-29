@@ -12,7 +12,7 @@
     "build": "next build",
     "test": "vitest run",
     "check": "tsc --noEmit",
-    "setup:docker": "node --experimental-strip-types scripts/setup-docker.ts",
+    "db:migrate": "node --experimental-strip-types --env-file=.env.migrate scripts/migrate-mongo.ts",
     "test:integration": "vitest run tests/mongo.integration.test.ts"
   },
   "dependencies": {

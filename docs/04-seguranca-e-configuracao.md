@@ -2,17 +2,17 @@
 
 ## Acao imediata sobre a credencial
 
-A URI MongoDB informada na conversa contem usuario e senha. Tratar a senha como exposta: rotacionar ou revogar a credencial no Atlas antes de usar esse cluster. Nao repetir a URI em documentos, commits, tickets, logs ou exemplos. Esta entrega nao utiliza essa credencial. O Compose usa Mongo local e segredos novos.
+A URI MongoDB informada na conversa contem usuario e senha. Tratar a senha como exposta: rotacionar ou revogar a credencial no Atlas antes de usar esse cluster. Nao repetir a URI em documentos, commits, tickets, logs ou exemplos. Configure uma credencial nova e restrita diretamente na Vercel.
 
 Provisionar usuario de aplicacao dedicado ao banco `MAPS`, com privilegios minimos. Separar usuario de migracao/administracao. Restringir a lista de acesso de rede aos enderecos necessarios, sem liberar indiscriminadamente a internet. Manter TLS com validacao de certificados.
 
 ## Variaveis propostas
 
 As variaveis de provedores abaixo sao propostas para a integracao futura. As chaves atualmente
-consumidas, o `.env.example`, o isolamento de segredos no Docker e o passo a
+consumidas, o `.env.example`, as variaveis privadas na Vercel e o passo a
 passo para rotacionar/provisionar o acesso Atlas estao em
-[Execucao e Docker](07-execucao-e-docker.md). O backend atual aceita
-`MONGODB_URI` privada ou compoe a conexao local com `MONGODB_PASSWORD_FILE`.
+[Deploy na Vercel](07-deploy-vercel.md). O backend exige
+`MONGODB_URI` privada explicita; nao compoe conexoes a partir de senhas avulsas.
 O navegador nunca recebe URI ou credenciais.
 
 Exemplo documental com placeholders; nao e uma configuracao pronta para executar:
@@ -60,9 +60,10 @@ em cada acesso de negocio, origem exata nas mutacoes, JSON estrito e limitado,
 autoria confiavel, versao/409, recibos idempotentes e auditoria sem conteudo.
 Nao ha cadastro aberto nem gestao de papeis pela interface; todos os e-mails
 autorizados compartilham um workspace definido pelo servidor.
-Somente o init recebe senha administrativa; o portal recebe usuario readWrite
-do banco especifico. Mongo nao e publicado no host. TLS para banco remoto e
-HTTPS publico permanecem obrigatorios. Rate limit de mutacoes: 300/minuto/usuario.
+Somente o processo de migracao recebe credencial temporaria com dbAdmin e
+readWrite no banco especifico; a Vercel recebe apenas o usuario readWrite da
+aplicacao. Acesso de rede Atlas deve ser restrito. TLS para o banco e HTTPS
+publico permanecem obrigatorios. Rate limit de mutacoes: 300/minuto/usuario.
 As obrigacoes operacionais e legais abaixo continuam exigindo aprovacao e teste.
 
 - Sessoes seguras com cookies HttpOnly, Secure e politica SameSite adequada; protecao CSRF nas mutacoes quando aplicavel.

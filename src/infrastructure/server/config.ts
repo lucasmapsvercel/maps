@@ -1,10 +1,8 @@
-import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 export function secret(name: string): string {
-  const file = process.env[`${name}_FILE`];
-  const value = file ? readFileSync(file, "utf8").trimEnd() : process.env[name];
-  if (!value) throw new Error(`Configure ${name} ou ${name}_FILE no servidor.`);
+  const value = process.env[name];
+  if (!value?.trim()) throw new Error(`Configure ${name} nas variáveis de ambiente do servidor.`);
   return value;
 }
 
@@ -36,8 +34,9 @@ export function databaseName(): string {
 }
 
 export function mongoUri(): string {
-  if (process.env.MONGODB_URI) return process.env.MONGODB_URI;
-  return `mongodb://maps:${encodeURIComponent(secret("MONGODB_PASSWORD"))}@mongo:27017/${databaseName()}?authSource=${databaseName()}&replicaSet=rs0`;
+  const uri = secret("MONGODB_URI");
+  if (!/^mongodb(?:\+srv)?:\/\//.test(uri)) throw new Error("MONGODB_URI deve ser uma URI MongoDB válida.");
+  return uri;
 }
 
 export function validateServerConfig() {

@@ -21,7 +21,7 @@ HTML gerado pelo framework e nao e versionado.
 | `src/infrastructure/server/mongo-schema.ts` | Migracao idempotente, validadores e indices |
 | `src/infrastructure/server/api.ts` | Autorizacao, origem, tamanho do corpo e respostas de erro |
 | `src/presentation` | Componentes TSX, formularios, fila de comandos e mensagens |
-| `scripts` | Preparacao privada, replica set, migracao e backup/restauracao Docker |
+| `scripts` | Migracao do schema no MongoDB Atlas, fora do build/deploy |
 | `tests` | Dominio, React, SSR, API, politica OAuth e integracao Mongo |
 
 As dependencias apontam para dentro. O dominio nao importa Next, React,
@@ -80,5 +80,7 @@ apresentado como integracao real nesta entrega.
 - `npm run check`, `npm test` e `npm run build` verificam tipagem, comportamento
   e empacotamento. Integracao usa replica set temporario independente.
 
-Operacao em [Docker e OAuth](07-execucao-e-docker.md); criterios de producao
+Deploy exclusivamente na Vercel, sem saida standalone ou provisionamento de
+banco pelo projeto. Variaveis privadas sao diretas; MongoDB exige URI explicita.
+Operacao em [Deploy na Vercel](07-deploy-vercel.md); criterios de producao
 e decisoes ainda pendentes em [Entrega](05-entrega-e-aceite.md).

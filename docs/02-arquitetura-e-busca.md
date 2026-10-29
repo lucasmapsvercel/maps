@@ -9,11 +9,11 @@ Responsabilidades, direcao das dependencias e estrutura implementada estao em
 Estado atual: portal Next.js com App Router, React e TypeScript
 estrito, autenticacao Google OAuth e persistencia MongoDB transacional.
 Frontend e endpoints
-compartilham projeto/deploy, separados por camadas. Compativel com Vercel e
-Docker Compose com Mongo autenticado/replica set. A API atual usa comandos
+compartilham projeto/deploy, separados por camadas. Deploy exclusivo na Vercel,
+com MongoDB Atlas externo autenticado e suporte a transacoes. A API atual usa comandos
 e agregado por workspace, nao o modelo normalizado de coleta abaixo.
 Fonte, limites, mapa cartografico e worker externo continuam pendentes. Consulte
-[Execucao e Docker](07-execucao-e-docker.md).
+[Deploy na Vercel](07-deploy-vercel.md).
 
 Stack do portal implementada: Next.js, React e TypeScript, com App Router
 para paginas TSX e endpoints de servidor. Casos de uso nao dependem do framework.

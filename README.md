@@ -23,7 +23,8 @@ Portal de pesquisa de estabelecimentos por termo e municipio, com buscas salvas 
 | [Seguranca e configuracao](docs/04-seguranca-e-configuracao.md) | Segredos, acesso ao banco, LGPD e regras do provedor |
 | [Entrega e aceite](docs/05-entrega-e-aceite.md) | Etapas de implementacao, testes e decisoes pendentes |
 | [Estrutura e padroes](docs/06-estrutura-e-padroes.md) | Clean Code, Arquitetura Limpa, SOLID, OO e responsabilidades |
-| [Execucao, Docker e Vercel](docs/07-execucao-e-docker.md) | Variaveis, Compose, deploy Vercel, testes e preparacao segura do Atlas |
+| [Deploy na Vercel](docs/07-deploy-vercel.md) | Variaveis, deploy, migracao Atlas, testes e operacao |
+| [Credenciais para a Vercel](docs/08-credenciais-vercel.md) | Criacao de Google OAuth, segredo de sessao e usuarios MongoDB Atlas |
 
 ## Condicoes essenciais
 
@@ -42,28 +43,11 @@ Nao ha arquivos HTML implementados manualmente. A entrada e definida em
 `src/app/layout.tsx` e `src/app/page.tsx`. O Next gerencia a resposta HTTP e
 seus artefatos internos em `.next`, que nao sao versionados.
 
-### Executar com Docker
-
-Com Docker Desktop e Compose v2, na raiz do projeto:
-
-```powershell
-npm.cmd ci
-npm.cmd run setup:docker
-# Configure OAuth Google e allowlist antes de iniciar (veja o guia abaixo).
-docker compose config --quiet
-docker compose up --build -d
-```
-
-O preparador preserva `.env` e segredos existentes. Siga obrigatoriamente o
-[passo a passo Google OAuth e Docker](docs/07-execucao-e-docker.md) para criar
-o Client ID e preencher privadamente o Client Secret. Abra <http://localhost:3000>.
-O Compose inclui MongoDB autenticado, replica set persistente, init/migracao e portal.
-Para encerrar: `docker compose down`.
-
-### Executar com Node.js
+### Desenvolvimento e validacao local
 
 Com Node.js 24 e MongoDB autenticado com replica set acessivel, variaveis
-OAuth/allowlist/segredo configuradas e banco migrado conforme o guia:
+OAuth/allowlist/segredo configuradas em ambiente privado de desenvolvimento
+e banco de teste migrado conforme o [guia Vercel](docs/07-deploy-vercel.md):
 
 ```powershell
 npm.cmd ci
@@ -86,11 +70,11 @@ como alvo; veja o escopo efetivo em [Dados e API](docs/03-dados-e-api.md).
 
 ### Publicar na Vercel
 
-Importe o repositorio como projeto **Next.js**, mantenha build e saida nos
-padroes do framework e use Node.js 24.x. Nao utilize Docker nem configure
-exportacao estatica na Vercel. O passo a passo, as variaveis e a separacao
-do futuro worker estao no [guia de execucao](docs/07-execucao-e-docker.md).
+O deploy suportado e exclusivamente na **Vercel**. Importe o repositorio como
+projeto **Next.js**, mantenha build e saida nos padroes do framework e use
+Node.js 24.x. Nao configure exportacao estatica. O passo a passo, as variaveis
+e a separacao do futuro worker estao no [guia Vercel](docs/07-deploy-vercel.md).
 
 Na Vercel, configure MongoDB externo com replica set, segredos OAuth e callback
-HTTPS; o Mongo local do Compose nao e acessivel pela Vercel.
+HTTPS. Use somente variaveis diretas de servidor no painel da plataforma.
 A credencial Atlas exposta nao foi utilizada e deve ser revogada.

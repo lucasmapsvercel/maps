@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 import { MongoClient, type Db } from "mongodb";
 import { MongoMemoryReplSet } from "mongodb-memory-server";
@@ -50,6 +53,19 @@ test("migrations are repeatable and records survive reopening the repository", a
   expect(created.state.searches[0].demo).toBe(false);
   const migration = await db.collection("schemaMigrations").findOne({});
   expect(migration?._id).toBe("portal-v1");
+});
+
+test("standalone migration command prepares an external database and is repeatable", async () => {
+  const run = promisify(execFile);
+  const env = { ...process.env, MONGODB_URI: server.getUri(), MONGODB_DB_NAME: "MAPS_MIGRATION_TEST" };
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const result = await run(process.execPath, ["--experimental-strip-types", resolve("scripts", "migrate-mongo.ts")], { env });
+    expect(result.stdout).toContain('"event":"migration_completed"');
+    expect(result.stdout).not.toContain(server.getUri());
+  }
+  const migrated = client.db("MAPS_MIGRATION_TEST");
+  expect(await migrated.collection("schemaMigrations").countDocuments()).toBe(1);
+  expect((await migrated.collection("portalViews").indexes()).some((index) => index.unique)).toBe(true);
 });
 
 test("views are per user while searches are shared; another workspace cannot access IDs", async () => {
@@ -115,6 +131,7 @@ test("HTTP API denies anonymous access and CSRF, persists authorized commands an
   }));
   expect(response.status).toBe(200);
   expect((await store.load(alice)).state.searches[0].term).toBe("Busca HTTP");
+  vi.stubEnv("GOOGLE_COLLECTION_ENABLED", "true");
   const blocked = await collect(new Request("http://localhost:3000/api/v1/collection", {
     method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: "{}"
   }));
