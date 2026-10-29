@@ -1,0 +1,38 @@
+{
+  "name": "maps-portal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "start": "next start --hostname 127.0.0.1",
+    "build": "next build",
+    "test": "vitest run",
+    "check": "tsc --noEmit",
+    "setup:docker": "node --experimental-strip-types scripts/setup-docker.ts",
+    "test:integration": "vitest run tests/mongo.integration.test.ts"
+  },
+  "dependencies": {
+    "mongodb": "^7.7.0",
+    "next-auth": "^4.24.15",
+    "zod": "^4.3.6",
+    "next": "^16.4.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "jsdom": "^27.1.0",
+    "mongodb-memory-server": "^11.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  }
+}

@@ -2,11 +2,18 @@
 
 ## Acao imediata sobre a credencial
 
-A URI MongoDB informada na conversa contem usuario e senha. Tratar a senha como exposta: rotacionar ou revogar a credencial no Atlas antes de implementar o acesso. Nao repetir a URI em documentos, commits, tickets, logs ou exemplos. Esta entrega nao se conectou ao banco.
+A URI MongoDB informada na conversa contem usuario e senha. Tratar a senha como exposta: rotacionar ou revogar a credencial no Atlas antes de usar esse cluster. Nao repetir a URI em documentos, commits, tickets, logs ou exemplos. Esta entrega nao utiliza essa credencial. O Compose usa Mongo local e segredos novos.
 
 Provisionar usuario de aplicacao dedicado ao banco `MAPS`, com privilegios minimos. Separar usuario de migracao/administracao. Restringir a lista de acesso de rede aos enderecos necessarios, sem liberar indiscriminadamente a internet. Manter TLS com validacao de certificados.
 
 ## Variaveis propostas
+
+As variaveis de provedores abaixo sao propostas para a integracao futura. As chaves atualmente
+consumidas, o `.env.example`, o isolamento de segredos no Docker e o passo a
+passo para rotacionar/provisionar o acesso Atlas estao em
+[Execucao e Docker](07-execucao-e-docker.md). O backend atual aceita
+`MONGODB_URI` privada ou compoe a conexao local com `MONGODB_PASSWORD_FILE`.
+O navegador nunca recebe URI ou credenciais.
 
 Exemplo documental com placeholders; nao e uma configuracao pronta para executar:
 
@@ -16,7 +23,7 @@ MONGODB_DB_NAME=MAPS
 GOOGLE_PLACES_API_KEY=<chave-exclusiva-do-backend>
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=<chave-publica-restrita-por-dominio>
 NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID=<map-id>
-AUTH_SECRET=<segredo-de-sessao-gerado-no-ambiente>
+NEXTAUTH_SECRET=<segredo-de-sessao-gerado-no-ambiente>
 GOOGLE_COLLECTION_ENABLED=false
 ```
 
@@ -46,6 +53,17 @@ Se um campo nao puder ser retido, nao sera possivel prometer sua exibicao futura
 Usar Google Maps para exibir sobre mapa os dados Places quando exigido pelos termos aplicaveis. Preservar atribuicoes Google Maps e de terceiros, inclusive em listas e detalhes conforme necessario. Nao assumir que trocar para Leaflet/OSM torna licito reutilizar conteudo Google.
 
 ## Autenticacao e privacidade
+
+Implementado: NextAuth com Google OAuth, cookies HttpOnly/SameSite e Secure
+em HTTPS (HTTP somente em loopback), e-mails verificados/allowlist revisada
+em cada acesso de negocio, origem exata nas mutacoes, JSON estrito e limitado,
+autoria confiavel, versao/409, recibos idempotentes e auditoria sem conteudo.
+Nao ha cadastro aberto nem gestao de papeis pela interface; todos os e-mails
+autorizados compartilham um workspace definido pelo servidor.
+Somente o init recebe senha administrativa; o portal recebe usuario readWrite
+do banco especifico. Mongo nao e publicado no host. TLS para banco remoto e
+HTTPS publico permanecem obrigatorios. Rate limit de mutacoes: 300/minuto/usuario.
+As obrigacoes operacionais e legais abaixo continuam exigindo aprovacao e teste.
 
 - Sessoes seguras com cookies HttpOnly, Secure e politica SameSite adequada; protecao CSRF nas mutacoes quando aplicavel.
 - Autorizacao no backend em todos os IDs, inclusive comentarios, execucoes e consultas geograficas. Nao confiar em filtros do frontend para isolamento.

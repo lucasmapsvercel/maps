@@ -2,7 +2,28 @@
 
 ## Decisao proposta
 
-Stack sugerida, ainda nao implementada: TypeScript, Next.js/React para portal e API, worker Node.js separado, MongoDB Atlas para dados e fila persistente em MongoDB no MVP. Google Maps JavaScript API para o mapa quando a fonte Google estiver habilitada; Places API (New) no backend para descoberta.
+Diretriz obrigatoria: Clean Code, Arquitetura Limpa, SOLID e orientacao a objetos.
+Responsabilidades, direcao das dependencias e estrutura implementada estao em
+[Estrutura e padroes](06-estrutura-e-padroes.md).
+
+Estado atual: portal Next.js com App Router, React e TypeScript
+estrito, autenticacao Google OAuth e persistencia MongoDB transacional.
+Frontend e endpoints
+compartilham projeto/deploy, separados por camadas. Compativel com Vercel e
+Docker Compose com Mongo autenticado/replica set. A API atual usa comandos
+e agregado por workspace, nao o modelo normalizado de coleta abaixo.
+Fonte, limites, mapa cartografico e worker externo continuam pendentes. Consulte
+[Execucao e Docker](07-execucao-e-docker.md).
+
+Stack do portal implementada: Next.js, React e TypeScript, com App Router
+para paginas TSX e endpoints de servidor. Casos de uso nao dependem do framework.
+Na Vercel, as rotas web executam no runtime da plataforma; coleta longa nao
+executa dentro de funcoes HTTP.
+
+Stack proposta para as proximas etapas: API de negocio em Route Handlers Next,
+autenticacao, worker Node.js externo, MongoDB Atlas e fila persistente no MVP.
+Google Maps JavaScript API para o mapa quando a fonte Google estiver habilitada;
+Places API (New) no backend para descoberta.
 
 O worker deve sobreviver ao encerramento de uma requisicao HTTP. Nao executar coleta longa dentro de uma rota web ou depender de uma aba aberta. Adotar driver oficial MongoDB e biblioteca geoespacial consolidada, como Turf, para intersecoes e testes de pertencimento.
 

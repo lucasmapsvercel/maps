@@ -2,6 +2,17 @@
 
 ## Etapas
 
+Fundacao de codigo: seguir [Estrutura e padroes](06-estrutura-e-padroes.md),
+incluindo Next.js App Router, React/TypeScript estrito, Clean Code,
+Arquitetura Limpa, SOLID e OO. Implementados: Next, login Google OAuth,
+persistencia MongoDB transacional, API de comandos, auditoria, concorrencia,
+replica set/migracao/volumes no Compose e documentacao de credenciais.
+Nao concluidos: fonte autorizada, limites/retencao, catalogo/grade, coleta,
+worker, mapa cartografico e contratos normalizados/paginados.
+Essas lacunas impedem afirmar atendimento integral de RF/CA ou prontidao de
+producao. O responsavel ainda nao definiu fonte e limites; nao habilitar coleta.
+Operacao em [Execucao e Docker](07-execucao-e-docker.md).
+
 | Etapa | Entrega | Condicao para avancar |
 | --- | --- | --- |
 | 0. Viabilidade | Fonte, direitos de coleta/retencao, campos e orcamento definidos; senha rotacionada | Nao habilitar coleta Google sem aprovacao documentada |
@@ -53,7 +64,9 @@ Nao executar o piloto automaticamente durante a criacao do projeto. Coleta real 
 1. A fonte/contrato autoriza varredura municipal e a base pretendida? Se nao, qual fornecedor licenciado sera usado?
 2. Quais campos precisam permanecer disponiveis e por quanto tempo? Consulta permanente sem refresh e obrigatoria para todos eles?
 3. Qual teto de requisicoes e custo em moeda definida por busca e por mes? Quem pode aprovar aumento?
-4. Confirmar stack proposta, provedor de autenticacao, hospedagem do portal e worker e quantidade de usuarios.
+4. Stack Next/React/TypeScript, Google OAuth e Mongo no Compose confirmados.
+   Falta configurar cliente Google, e-mails autorizados, hospedagem publica,
+   worker e quantidade de usuarios.
 5. Aprovar fonte e versao da malha municipal e a inclusao de todo o territorio de Belem, nao apenas a area urbana central.
 6. Confirmar favoritos/comentarios compartilhados e ocultacao por busca, conforme regra proposta.
 

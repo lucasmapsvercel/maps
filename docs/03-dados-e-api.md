@@ -1,5 +1,41 @@
 # Modelo MongoDB e contratos de API
 
+## Escopo implementado nesta etapa
+
+O modelo normalizado e os endpoints das secoes seguintes sao o alvo para
+coleta real, ainda nao implementado. A interface atual funciona com:
+
+| Endpoint | Implementacao |
+| --- | --- |
+| `GET/POST /api/auth/*` | NextAuth, Google OAuth, cookies de sessao e CSRF |
+| `GET /api/v1/portal` | Snapshot Mongo do workspace e view do usuario, com versao |
+| `POST /api/v1/portal` | `{ version, commandId, command }`, sem estado/autor/workspace do cliente |
+| `POST /api/v1/collection` | 409 explicito: fonte, retencao e limites nao configurados |
+| `GET /api/health` | Liveness sem banco |
+| `GET /api/ready` | Configuracao, ping Mongo e marcador de migracao |
+
+Comandos: `addSearch`, `openSearch`, `closeTab`, `navigate`, `setFilter`,
+`toggleFavorite`, `toggleHidden`, `addComment`, `editPlace`, `clearOverrides`.
+Schemas estritos em `src/domain/portal-command.ts`. Comando recebe somente
+campos permitidos; IDs, data e autor novos sao definidos pelo servidor.
+As respostas do portal sao `{ state, version }`; erros possuem `error`, `code`
+e identificador de requisicao. Todas as leituras sao locais, sem coleta.
+
+Colecoes atuais: `portalWorkspaces` (agregado comercial de ate 8 MiB e versao),
+`portalViews` (workspace/usuario, indice unico), `memberships` (vinculos de
+identidades permitidas), `auditEvents`, `commandReceipts` (UUID idempotente,
+TTL sete dias), `apiRateLimits` (300 mutacoes/minuto/usuario) e `schemaMigrations`.
+Workspace e usuario vem da sessao/configuracao, nunca do corpo.
+O agregado usa IDs string UUID e datas ISO internas; metadados Mongo usam Date.
+As convencoes ObjectId/BSON das proximas secoes sao o alvo normalizado.
+
+Cada comando usa transacao com versao esperada, alteracoes comerciais e view,
+auditoria e recibo. Conflitos retornam 409 sem sobrescrever dados. Repetir
+UUID/conteudo devolve estado atual sem repetir a alteracao; UUID com outro
+conteudo retorna 409. Corpos acima de 8 KiB sao rejeitados.
+Nao estao implementados paginacao, geoconsultas ou coleta dos contratos abaixo.
+Procedimentos em [Execucao e Docker](07-execucao-e-docker.md).
+
 ## Convencoes
 
 Banco: `MAPS`. IDs internos ObjectId, serializados como strings na API; datas BSON Date em UTC, serializadas em ISO 8601. Localizacoes GeoJSON usam `[longitude, latitude]`, nunca a ordem inversa. Toda entidade de negocio pertence a um `workspaceId` obtido da sessao, nunca confiado a partir do corpo enviado pelo cliente.

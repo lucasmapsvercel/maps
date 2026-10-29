@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules/
+coverage/
+dist/
+build/
+*.tsbuildinfo
+.next/
+next-env.d.ts
+.vercel/
+*.log
+.secrets/
+.backups/
