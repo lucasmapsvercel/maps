@@ -283,6 +283,18 @@ button:disabled {
 }
 
 /* Coleta de estabelecimentos */
+.collection-state { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border-radius: 8px; margin-bottom: 14px; border: 1px solid var(--line); }
+.collection-state p { margin: 4px 0 0; font-size: 10px; color: var(--muted); line-height: 1.5; }
+.collection-state strong { font-size: 12px; }
+.state-full { background: var(--green-soft); border-color: #c2dfd0; }
+.state-partial { background: #fff8ed; border-color: #f0ddb3; }
+.state-empty { background: var(--canvas); }
+.state-icon { font-size: 18px; line-height: 1; margin-top: 2px; flex-shrink: 0; color: var(--green); }
+.state-partial-icon { color: var(--orange); }
+.state-empty-icon { color: var(--muted); }
+.setting-form { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.setting-input { width: 100px; }
+.setting-success { font-size: 11px; color: var(--green-dark); margin: 8px 0 0; }
 .quota-panel { background: var(--canvas); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; display: grid; gap: 8px; }
 .quota-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .quota-label { font-size: 11px; color: var(--muted); }

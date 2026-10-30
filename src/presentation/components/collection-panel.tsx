@@ -57,10 +57,7 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
   }, []);
 
   useEffect(() => { void fetchQuota(); }, [fetchQuota]);
-
-  useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, []);
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   function startPolling(jobId: string) {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -75,10 +72,7 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
         if (job.status === "done" || job.status === "failed") {
           clearInterval(pollRef.current!);
           pollRef.current = null;
-          if (job.status === "done") {
-            await portal.forceRefresh();
-            await fetchQuota();
-          }
+          if (job.status === "done") { await portal.forceRefresh(); await fetchQuota(); }
         }
       } catch { /* ignorar erros transitórios de rede */ }
     }, 2500);
@@ -108,20 +102,58 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
     }
   }
 
-  function handleRetry() {
-    setActiveJob(null);
-    setError("");
-    void fetchQuota();
-  }
+  function handleRetry() { setActiveJob(null); setError(""); void fetchQuota(); }
 
-  const canStart = quota && quota.remaining >= quota.callsPerSearch && !activeJob && !starting;
+  // --- lógica de deduplicação ---
+  const alreadyCollected = search.placeIds.length;
+  const limit = quota?.maxResultsPerSearch ?? 100;
+  const alreadyFull = alreadyCollected >= limit;
+  const hasPartial = alreadyCollected > 0 && !alreadyFull;
+  const remaining = Math.max(0, limit - alreadyCollected);
+
+  const quotaOk = quota && quota.remaining >= quota.callsPerSearch;
+  const canStart = quotaOk && !alreadyFull && !activeJob && !starting;
+
   const usedPct = quota ? Math.min(100, (quota.used / quota.limit) * 100) : 0;
 
   return (
     <section className="page-card" aria-label="Coleta de estabelecimentos">
       <h2>Coletar estabelecimentos</h2>
 
-      {/* Painel de cota */}
+      {/* Estado dos dados já coletados */}
+      <div className={`collection-state ${alreadyFull ? "state-full" : hasPartial ? "state-partial" : "state-empty"}`}>
+        {alreadyFull && (
+          <>
+            <span className="state-icon">✓</span>
+            <div>
+              <strong>{alreadyCollected} estabelecimentos já coletados</strong>
+              <p>O limite de {limit} resultados foi atingido. Nenhuma chamada ao Google é necessária.
+                Para coletar mais, aumente o limite em <em>Configurações → Resultados por coleta</em>.</p>
+            </div>
+          </>
+        )}
+        {hasPartial && (
+          <>
+            <span className="state-icon state-partial-icon">◑</span>
+            <div>
+              <strong>{alreadyCollected} de {limit} estabelecimentos coletados</strong>
+              <p>Faltam até <strong>{remaining}</strong> resultados para atingir o limite.
+                Esta coleta buscará os dados restantes sem repetir os já salvos.</p>
+            </div>
+          </>
+        )}
+        {!alreadyFull && !hasPartial && (
+          <>
+            <span className="state-icon state-empty-icon">○</span>
+            <div>
+              <strong>Nenhum resultado coletado ainda</strong>
+              <p>Esta coleta buscará até <strong>{limit}</strong> estabelecimentos e os salvará no workspace.</p>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Painel de cota mensal */}
       <div className="quota-panel" aria-label="Cota mensal de API">
         {quotaError ? (
           <p className="quota-error">{quotaError}</p>
@@ -138,31 +170,25 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
             <div className="quota-bar" role="progressbar" aria-valuenow={quota.used} aria-valuemin={0} aria-valuemax={quota.limit}>
               <div className="quota-bar-fill" style={{ width: `${usedPct}%` }} />
             </div>
-            <p className="quota-detail">
-              Esta coleta buscará até{" "}
-              <strong>{quota.maxResultsPerSearch} estabelecimentos</strong>
-              {" "}consumindo{" "}
-              <strong>{quota.callsPerSearch} {quota.callsPerSearch === 1 ? "chamada" : "chamadas"}</strong>
-              {" "}da cota.
-              {quota.remaining < quota.callsPerSearch && (
-                <span className="quota-warning"> Cota insuficiente para esta coleta.</span>
-              )}
-            </p>
+            {!alreadyFull && (
+              <p className="quota-detail">
+                Esta coleta consumirá até{" "}
+                <strong>{quota.callsPerSearch} {quota.callsPerSearch === 1 ? "chamada" : "chamadas"}</strong>
+                {" "}da cota.
+                {!quotaOk && <span className="quota-warning"> Cota insuficiente.</span>}
+              </p>
+            )}
           </>
         ) : (
           <p className="quota-loading">Carregando cota…</p>
         )}
       </div>
 
-      {/* Estado do job */}
-      {!activeJob && (
+      {/* Botão de ação */}
+      {!activeJob && !alreadyFull && (
         <div className="modal-actions">
-          <button
-            className="button button-primary"
-            disabled={!canStart}
-            onClick={handleStart}
-          >
-            {starting ? "Iniciando coleta…" : "Coletar estabelecimentos"}
+          <button className="button button-primary" disabled={!canStart} onClick={handleStart}>
+            {starting ? "Iniciando coleta…" : hasPartial ? "Completar coleta" : "Coletar estabelecimentos"}
           </button>
         </div>
       )}
@@ -171,33 +197,23 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
 
       {activeJob && (
         <div className="collection-status" role="status" aria-live="polite">
-          {activeJob.status === "pending" && (
-            <span className="collection-badge badge-pending">Aguardando início…</span>
-          )}
-          {activeJob.status === "running" && (
-            <span className="collection-badge badge-running">Coletando estabelecimentos…</span>
-          )}
+          {activeJob.status === "pending" && <span className="collection-badge badge-pending">Aguardando início…</span>}
+          {activeJob.status === "running" && <span className="collection-badge badge-running">Coletando estabelecimentos…</span>}
           {activeJob.status === "done" && (
             <>
               <span className="collection-badge badge-done">
                 Coleta concluída — {activeJob.importedCount ?? 0} estabelecimento(s) importado(s).
               </span>
               <div className="modal-actions">
-                <button className="button button-quiet" onClick={handleRetry}>
-                  Nova coleta
-                </button>
+                <button className="button button-quiet" onClick={handleRetry}>Nova coleta</button>
               </div>
             </>
           )}
           {activeJob.status === "failed" && (
             <>
-              <span className="collection-badge badge-failed" role="alert">
-                Falha: {activeJob.error}
-              </span>
+              <span className="collection-badge badge-failed" role="alert">Falha: {activeJob.error}</span>
               <div className="modal-actions">
-                <button className="button button-quiet" onClick={handleRetry}>
-                  Tentar novamente
-                </button>
+                <button className="button button-quiet" onClick={handleRetry}>Tentar novamente</button>
               </div>
             </>
           )}

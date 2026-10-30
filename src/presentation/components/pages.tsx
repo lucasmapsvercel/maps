@@ -1,6 +1,7 @@
 import type { Portal } from "../use-portal";
 import { EmptyState } from "./common";
 import { PlaceList } from "./place-list";
+import { CollectionSettings } from "./collection-settings";
 
 export function SavedSearches({ portal }: { portal: Portal }) {
   return <div className="saved-list">{portal.state.searches.length ? portal.state.searches.map((search) =>
@@ -20,15 +21,26 @@ export function Favorites({ portal, onSelect, selectedId }: {
 }
 
 export function Settings({ remote = false }: { remote?: boolean }) {
-  return <section className="page-card"><h2>Estado deste portal</h2>
-    <p>{remote ? "Portal autenticado com Google OAuth. Dados compartilhados no MongoDB; abas e filtros separados por usuário." : "Demonstração isolada para testes locais, com dados sintéticos."}</p>
-    <div className="settings-grid">
-      {[
-        ["Consulta de estabelecimentos", "Google Places sob demanda: uma chamada, até 20 resultados temporários. Exige chave, revisão das políticas e limite da franquia disponível.", "Configuração obrigatória"],
-        ["Mapa", "A primeira integração Google exibe somente lista com atribuição, sem carregamento de mapa pago.", "Não habilitado"],
-        ["Dados e armazenamento", remote ? "Buscas, comentários, favoritos e ajustes persistem no MongoDB. O navegador não é a fonte dos dados." : "Dados sintéticos neste navegador.", remote ? "MongoDB" : "Armazenamento local"],
-        ["Acesso e segurança", remote ? "Google OAuth, e-mails verificados e lista de acesso definida pelo administrador." : "Somente demonstração.", remote ? "Autenticado" : "Teste isolado"]
-      ].map(([title, description, status]) => <article className="setting-card" key={title}><h3>{title}</h3><p>{description}</p><span className="setting-status"><span className="status-dot" />{status}</span></article>)}
-    </div>
-  </section>;
+  return <>
+    <section className="page-card"><h2>Estado deste portal</h2>
+      <p>{remote ? "Portal autenticado com Google OAuth. Dados compartilhados no MongoDB; abas e filtros separados por usuário." : "Demonstração isolada para testes locais, com dados sintéticos."}</p>
+      <div className="settings-grid">
+        {[
+          ["Consulta de estabelecimentos", "Coleta em segundo plano: até N resultados por busca (configurável abaixo), salvos no MongoDB. Sem repetição de chamadas ao Google para buscas já coletadas.", remote ? "Habilitado" : "Configuração obrigatória"],
+          ["Mapa", "Pins Leaflet com coordenadas reais dos estabelecimentos coletados.", "OpenStreetMap"],
+          ["Dados e armazenamento", remote ? "Buscas, comentários, favoritos e ajustes persistem no MongoDB. O navegador não é a fonte dos dados." : "Dados sintéticos neste navegador.", remote ? "MongoDB" : "Armazenamento local"],
+          ["Acesso e segurança", remote ? "Google OAuth, e-mails verificados e lista de acesso definida pelo administrador." : "Somente demonstração.", remote ? "Autenticado" : "Teste isolado"]
+        ].map(([title, description, status]) => <article className="setting-card" key={title}><h3>{title}</h3><p>{description}</p><span className="setting-status"><span className="status-dot" />{status}</span></article>)}
+      </div>
+    </section>
+    {remote && (
+      <section className="page-card">
+        <h2>Configurações de coleta</h2>
+        <p>Defina o comportamento da coleta automática de estabelecimentos via Google Places.</p>
+        <div className="settings-grid">
+          <CollectionSettings />
+        </div>
+      </section>
+    )}
+  </>;
 }
