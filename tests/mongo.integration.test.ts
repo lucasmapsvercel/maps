@@ -386,6 +386,85 @@ test("failed import retries the saved page without another Google call and overl
   expect((await store.load(actor)).state.searches[0].placeIds).toEqual(["saved-page-place"]);
 });
 
+test.each(["import-first", "response-first", "import-failure", "failure-in-flight"])(
+  "next Google request overlaps a slow import without losing pages (%s)", async (order) => {
+    vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+    const actor = { ...alice, workspaceId: `pipeline-${order}` };
+    const initial = await store.load(actor);
+    const saved = await store.execute(actor, { type: "addSearch", term: "Fluxo", city: "Belém" }, initial.version);
+    const search = saved.state.searches[0];
+    let releaseImport!: () => void;
+    const importing = new Promise<void>((resolve) => { releaseImport = resolve; });
+    const execute = MongoPortalStore.prototype.execute;
+    const imports = vi.spyOn(MongoPortalStore.prototype, "execute").mockImplementationOnce(async function (
+      this: MongoPortalStore, ...args: Parameters<MongoPortalStore["execute"]>
+    ) {
+      await importing;
+      if (order === "import-failure" || order === "failure-in-flight") throw new Error("Importação indisponível");
+      return execute.apply(this, args);
+    });
+    const page = (start: number, nextPageToken?: string) => Response.json({
+      places: Array.from({ length: 20 }, (_, index) => ({ id: `pipeline-${start + index}` })), nextPageToken
+    });
+    let releaseResponse!: (response: Response) => void;
+    const transport = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(page(0, "next-page"))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { releaseResponse = resolve; }));
+    const scope = randomUUID();
+    const first = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+    try {
+      await vi.waitFor(() => {
+        expect(imports).toHaveBeenCalledTimes(1);
+        expect(transport).toHaveBeenCalledTimes(2);
+      });
+      expect((await store.load(actor)).state.searches[0].placeIds).toHaveLength(0);
+      expect(JSON.parse(String(transport.mock.calls[1][1]?.body)).pageToken).toBe("next-page");
+      if (order === "failure-in-flight") {
+        releaseImport();
+        await expect(imports.mock.results[0].value).rejects.toThrow("Importação indisponível");
+        expect((await getCollectionJob(first, actor.workspaceId, db))?.status).toBe("running");
+        await expect(startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db))
+          .rejects.toMatchObject({ code: "COLLECTION_ALREADY_RUNNING" });
+        releaseResponse(page(20));
+      } else if (order === "import-first") {
+        releaseImport();
+        await vi.waitFor(async () => expect((await getCollectionJob(first, actor.workspaceId, db))?.collectedSoFar).toBe(20));
+        expect((await getCollectionJob(first, actor.workspaceId, db))?.status).toBe("running");
+        releaseResponse(page(20));
+      } else {
+        releaseResponse(page(20));
+        await vi.waitFor(async () => {
+          const cursor = await db.collection("collectionCursors").findOne({ searchId: search.id });
+          expect(cursor?.buffer).toHaveLength(40);
+          expect(cursor?.exhausted).toBe(true);
+        });
+        releaseImport();
+      }
+      const job = await waitForJob(first, actor.workspaceId);
+      const failed = order === "import-failure" || order === "failure-in-flight";
+      expect(job).toMatchObject({ status: failed ? "failed" : "done", requestsMade: 2 });
+      imports.mockRestore();
+      if (failed) {
+        const retry = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+        expect(await waitForJob(retry, actor.workspaceId)).toMatchObject({
+          status: "done", requestsMade: 0, importedCount: 40, hasMore: false
+        });
+      } else {
+        expect(job).toMatchObject({ importedCount: 40, collectedSoFar: 40, hasMore: false });
+      }
+      expect(transport).toHaveBeenCalledTimes(2);
+      const ids = (await store.load(actor)).state.searches[0].placeIds;
+      expect(ids).toHaveLength(40);
+      expect(new Set(ids).size).toBe(40);
+      expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 2 });
+      expect((await db.collection("collectionCursors").findOne({ searchId: search.id }))?.buffer).toEqual([]);
+    } finally {
+      releaseImport();
+      releaseResponse?.(page(20));
+    }
+  }
+);
+
 test("duplicate Place IDs do not count toward the batch and legacy searches cannot silently restart", async () => {
   vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
   const actor = { ...alice, workspaceId: "incremental-duplicates" };

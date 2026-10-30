@@ -58,9 +58,10 @@ export function MunicipalityPicker({ value, onChange }: { value: Municipality | 
     <label className="field-label" htmlFor={id}>Município</label>
     <input id={id} className="text-input" role="combobox" autoComplete="off"
       aria-autocomplete="list" aria-expanded={expanded} aria-controls={`${id}-options`}
+      aria-busy={loading}
       aria-activedescendant={expanded && active >= 0 ? `${id}-option-${active}` : undefined}
       aria-describedby={`${id}-help`} required maxLength={200} disabled={loading || Boolean(error)}
-      value={query} placeholder="Digite o município ou município e UF"
+      value={query} placeholder={loading ? "Carregando…" : "Digite o município ou município e UF"}
       onFocus={() => setOpen(true)} onBlur={() => setOpen(false)}
       onChange={(event) => {
         setQuery(event.target.value);
@@ -81,8 +82,8 @@ export function MunicipalityPicker({ value, onChange }: { value: Municipality | 
         }
       }} />
     <small id={`${id}-help`}>Selecione uma opção do IBGE. Digitar o nome sem selecionar não confirma o município.</small>
-    {loading && <p role="status">Carregando municípios do IBGE…</p>}
-    {backupDate && <p role="status">IBGE indisponível no momento. Usando catálogo de reserva do IBGE obtido em {backupDate}. A seleção continua disponível.</p>}
+    {loading && <p role="status">Carregando municípios…</p>}
+    {!loading && !error && backupDate && <small>Base de municípios de {backupDate}.</small>}
     {error && <><p role="alert" className="collection-error">{error}</p>
       <button type="button" className="button button-quiet button-small" onClick={() => setRevision((value) => value + 1)}>Tentar carregar municípios novamente</button></>}
     {expanded && <>

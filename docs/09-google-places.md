@@ -57,10 +57,26 @@ nao faz parte dos logs de consultas e nao e exposto pelos endpoints de jobs.
 A pagina e salva antes da importacao, e o cursor so descarta itens apos
 importacao bem-sucedida. Falhas preservam o cursor; registros ja importados
 sao reconhecidos por Place ID. Apenas um job por busca pode executar por vez.
+A proxima pagina e solicitada enquanto a atual e importada, se houver token,
+limite por execucao e cota disponivel. Ha no maximo uma chamada Google em
+andamento por job e uma pagina antecipada, sem consultas especulativas alem
+da paginacao. O buffer pode conter ate duas paginas nesse fluxo; dados antigos
+maiores sao drenados em grupos de ate 20 antes de antecipar novas paginas.
+Acrescentar resultados e remover o prefixo importado sao operacoes atomicas,
+evitando perder a pagina seguinte se ela chegar durante a importacao.
+Em falha, o job aguarda tambem a chamada em voo e sua persistencia antes de
+liberar o cursor. Uma pagina antecipada consome cota mesmo se a importacao
+falhar; os dados recebidos ficam salvos para retomar sem outra chamada.
+
 A interface restaura o ultimo job ao reabrir a busca e permite continuar mesmo
 independentemente do total de estabelecimentos salvos. `hasMore: false` indica
 que o Google nao enviou proxima pagina e nao ha itens pendentes no buffer;
 novas coletas sao bloqueadas sem consumir cota.
+O progresso inclui `collectedSoFar`; a cada leitura de progresso (intervalo
+de 2,5 segundos apos a anterior), resultados salvos e cota sao atualizados
+quando ha novas importacoes, e novamente ao concluir ou falhar. A lista e o
+mapa nao precisam esperar o fim de toda a execucao. Esses refreshes nao
+consultam o Google e preservam navegacao, abas e filtros.
 
 Tokens sao controlados pelo Google e podem deixar de ser validos. Nao ha
 reinicio automatico da primeira pagina em caso de token recusado. Buscas

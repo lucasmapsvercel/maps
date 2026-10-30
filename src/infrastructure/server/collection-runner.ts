@@ -25,14 +25,13 @@ export interface CollectionJob extends Omit<CollectionJobInfo, "id" | "createdAt
   createdAt: Date;
   startedAt?: Date;
   finishedAt?: Date;
-  /** Quantos lugares foram importados até o momento pelo job atual. */
-  collectedSoFar?: number;
 }
 
 export function serializeCollectionJob(job: CollectionJob): CollectionJobInfo {
   return {
     id: job._id, status: job.status, importedCount: job.importedCount, error: job.error, hasMore: job.hasMore,
     requestsMade: job.requestsMade, maxRequestsPerRun: job.maxRequestsPerRun,
+    collectedSoFar: job.collectedSoFar,
     createdAt: job.createdAt.toISOString(), startedAt: job.startedAt?.toISOString(), finishedAt: job.finishedAt?.toISOString()
   };
 }
@@ -204,41 +203,59 @@ async function processCollectionJob(
     let pageIndex = 0;
     let requestsMade = claimed.requestsMade;
 
+    const fetchNextPage = async () => {
+      const result = await loggedSearch.search(actor, {
+        requestId: `${jobId}-p${requestsMade}`, searchId: claimed.searchId, term: claimed.term, city: claimed.city,
+        source: "collection", limit, billingScope, pageToken: cursor.nextPageToken, collectionJobId: jobId
+      });
+      requestsMade++;
+      if (result.nextPageToken && result.nextPageToken === cursor.nextPageToken) {
+        throw new PortalError(502, "GOOGLE_PAGINATION_STALLED", "O Google repetiu o token de paginação. A coleta foi interrompida para evitar consultas repetidas.");
+      }
+      // Acrescentar e remover o prefixo são operações atômicas: a importação não apaga uma página recebida em paralelo.
+      await cursors.updateOne({ _id: cursor._id, activeJobId: jobId }, {
+        $push: { buffer: { $each: result.places } },
+        $set: {
+          exhausted: !result.nextPageToken,
+          ...(result.nextPageToken ? { nextPageToken: result.nextPageToken } : {})
+        },
+        ...(!result.nextPageToken ? { $unset: { nextPageToken: "" } } : {})
+      }, { ignoreUndefined: true });
+      cursor.buffer.push(...result.places);
+      cursor.nextPageToken = result.nextPageToken;
+      cursor.exhausted = !result.nextPageToken;
+    };
+
     while (true) {
-      const pageId = `${jobId}-p${pageIndex}`;
       if (cursor.buffer.length === 0) {
-        if (cursor.exhausted) break;
-        if (requestsMade >= claimed.maxRequestsPerRun) break;
-        const result = await loggedSearch.search(actor, {
-          requestId: pageId, searchId: claimed.searchId, term: claimed.term, city: claimed.city,
-          source: "collection", limit, billingScope, pageToken: cursor.nextPageToken, collectionJobId: jobId
-        });
-        requestsMade++;
-        if (result.nextPageToken && result.nextPageToken === cursor.nextPageToken) {
-          throw new PortalError(502, "GOOGLE_PAGINATION_STALLED", "O Google repetiu o token de paginação. A coleta foi interrompida para evitar consultas repetidas.");
-        }
-        cursor.buffer = result.places;
-        cursor.nextPageToken = result.nextPageToken;
-        cursor.exhausted = !result.nextPageToken;
-        // Salvar a página antes de importar permite retomar uma falha sem consultar o Google novamente.
-        await cursors.updateOne({ _id: cursor._id, activeJobId: jobId }, {
-          $set: {
-            buffer: cursor.buffer, exhausted: cursor.exhausted,
-            ...(cursor.nextPageToken ? { nextPageToken: cursor.nextPageToken } : {})
-          },
-          ...(!cursor.nextPageToken ? { $unset: { nextPageToken: "" } } : {})
-        }, { ignoreUndefined: true });
+        if (cursor.exhausted || requestsMade >= claimed.maxRequestsPerRun) break;
+        await fetchNextPage();
       }
-      const batch = cursor.buffer.filter((place, index, places) =>
+      const page = cursor.buffer.slice(0, GOOGLE_TEXT_SEARCH_PAGE_SIZE);
+      const batch = page.filter((place, index, places) =>
         !knownIds.has(place.id) && places.findIndex((item) => item.id === place.id) === index);
-      if (batch.length > 0) {
-        await importPage(actor, batch, claimed.searchId, pageId, client, db);
-        for (const place of batch) knownIds.add(place.id);
-        collectedThisJob += batch.length;
+      const importCurrentPage = async () => {
+        if (batch.length > 0) {
+          await importPage(actor, batch, claimed.searchId, `${jobId}-import${pageIndex}`, client, db);
+          for (const place of batch) knownIds.add(place.id);
+          collectedThisJob += batch.length;
+        };
+        if (page.length > 0) {
+          await cursors.updateOne({ _id: cursor._id, activeJobId: jobId }, [{
+            $set: { buffer: { $slice: ["$buffer", page.length, { $add: [{ $size: "$buffer" }, 1] }] } }
+          }]);
+          cursor.buffer = cursor.buffer.slice(page.length);
+        }
+        await jobs.updateOne({ _id: jobId }, { $set: { collectedSoFar: collectedThisJob } });
       }
-      cursor.buffer = [];
-      await cursors.updateOne({ _id: cursor._id, activeJobId: jobId }, { $set: { buffer: cursor.buffer } }, { ignoreUndefined: true });
-      await jobs.updateOne({ _id: jobId }, { $set: { collectedSoFar: collectedThisJob } });
+      const canPrefetch = !cursor.exhausted && requestsMade < claimed.maxRequestsPerRun &&
+        cursor.buffer.length <= GOOGLE_TEXT_SEARCH_PAGE_SIZE;
+      // Aguarda ambas antes de encerrar o job ou liberar seu cursor, inclusive em caso de falha.
+      const [imported, fetched] = await Promise.allSettled([
+        importCurrentPage(), canPrefetch ? fetchNextPage() : Promise.resolve()
+      ]);
+      if (imported.status === "rejected") throw imported.reason;
+      if (fetched.status === "rejected") throw fetched.reason;
       pageIndex++;
     }
 

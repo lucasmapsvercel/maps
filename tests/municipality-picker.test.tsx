@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { SearchDialog } from "../src/presentation/components/search-dialog";
@@ -83,12 +83,32 @@ test("catalog errors are shown, retry loads suggestions and no default city is s
   expect(screen.getByRole("button", { name: /Salvar busca/ })).toBeDisabled();
 });
 
-test("backup catalog is disclosed without blocking municipality selection or saving a search", async () => {
+test("loading is visible until the catalog arrives and then enables municipality selection", async () => {
+  let release!: (response: Response) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { release = resolve; })));
+  render(<SearchDialog portal={portal()} onClose={vi.fn()} />);
+  const input = screen.getByRole("combobox");
+  expect(input).toBeDisabled();
+  expect(input).toHaveAttribute("aria-busy", "true");
+  expect(input).toHaveAttribute("placeholder", "Carregando…");
+  expect(screen.getByRole("status")).toHaveTextContent("Carregando municípios…");
+  await act(async () => { release(Response.json(catalog)); });
+  expect(input).toBeEnabled();
+  expect(input).toHaveAttribute("aria-busy", "false");
+  expect(input).toHaveAttribute("placeholder", "Digite o município ou município e UF");
+  expect(screen.queryByText("Carregando municípios…")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Base de municípios de/)).not.toBeInTheDocument();
+});
+
+test("backup catalog shows only its date without blocking municipality selection or saving a search", async () => {
   const user = userEvent.setup();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ...catalog, source: "backup" })));
   const state = portal();
   render(<SearchDialog portal={state} onClose={vi.fn()} />);
-  expect(await screen.findByText(/Usando catálogo de reserva do IBGE/)).toBeInTheDocument();
+  const date = new Date(catalog.updatedAt).toLocaleDateString("pt-BR");
+  expect(await screen.findByText(`Base de municípios de ${date}.`)).toBeInTheDocument();
+  expect(screen.queryByText(/indisponível|reserva|backup/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   await user.type(screen.getByLabelText("Termo de pesquisa"), "Farmácia");
   await user.type(screen.getByRole("combobox"), "belem pa");
   await user.click(screen.getByRole("option", { name: /Belém — PA/ }));

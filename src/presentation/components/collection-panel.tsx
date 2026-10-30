@@ -59,6 +59,7 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
     if (!pollingJobId) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let displayedCount = 0;
     async function poll() {
       let finished = false;
       try {
@@ -67,9 +68,11 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
         const job = collectionJobSchema.parse(await res.json());
         if (controller.signal.aborted) return;
         const terminal = job.status === "done" || job.status === "failed";
-        if (terminal) {
+        const collected = job.collectedSoFar ?? 0;
+        if (terminal || collected > displayedCount) {
           await portal.forceRefresh();
           await fetchQuota(controller.signal);
+          displayedCount = collected;
         }
         if (!controller.signal.aborted) {
           setError("");
@@ -178,6 +181,7 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
           {activeJob.status === "pending" && <span className="collection-badge badge-pending">Aguardando início…</span>}
           {activeJob.status === "running" && <span className="collection-badge badge-running">
             Coletando estabelecimentos… {activeJob.requestsMade ?? 0} requisição(ões) de até {activeJob.maxRequestsPerRun ?? limit}.
+            {" "}{activeJob.collectedSoFar ?? 0} estabelecimento(s) importado(s) nesta execução.
           </span>}
           {activeJob.status === "done" && (
             <>

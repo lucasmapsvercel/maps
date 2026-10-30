@@ -79,7 +79,7 @@ como alvo; veja o escopo efetivo em [Dados e API](docs/03-dados-e-api.md).
 
 O seletor consulta o IBGE e mantem cache de 24 horas. Se o servico falhar,
 usa o ultimo catalogo valido ou uma copia oficial incluida no deploy,
-com aviso na interface e registro no servidor. A reserva inclui 5571
+mostrando apenas a data da base na interface e registrando a falha no servidor. A reserva inclui 5571
 municipios das 27 UFs e nao consome Google Places. A validacao da busca
 no servidor usa o mesmo catalogo; nunca aceita somente um nome livre.
 

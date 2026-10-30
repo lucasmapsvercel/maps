@@ -64,7 +64,7 @@ test("shared job serializer preserves the HTTP contract without exposing workspa
   const serialized = serializeCollectionJob(job);
   expect(collectionJobSchema.parse(serialized)).toEqual(serialized);
   expect(JSON.parse(JSON.stringify(serialized))).toEqual({
-    id: "job-id", status: "done", requestsMade: 2, maxRequestsPerRun: 100, importedCount: 40, hasMore: true,
+    id: "job-id", status: "done", requestsMade: 2, maxRequestsPerRun: 100, importedCount: 40, hasMore: true, collectedSoFar: 40,
     createdAt: "2026-10-30T01:00:00.000Z", startedAt: "2026-10-30T01:00:01.000Z", finishedAt: "2026-10-30T01:00:02.000Z"
   });
   expect(serializeCollectionJob({ ...job, startedAt: undefined, finishedAt: undefined })).toMatchObject({

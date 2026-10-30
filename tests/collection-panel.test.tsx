@@ -103,3 +103,27 @@ test("polling recovers from a progress error and stops when the job finishes", a
   expect(polls).toBe(2);
   view.unmount();
 });
+
+test("running jobs refresh imported results progressively without refreshing unchanged progress", async () => {
+  vi.useFakeTimers();
+  const state = portal();
+  let count = 20;
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith("/quota")) return Response.json(quota);
+    if (url.includes("?searchId=")) return Response.json([{ id: "running", status: "running" }]);
+    return Response.json({ id: "running", status: "running", collectedSoFar: count, requestsMade: 2 });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const view = render(<CollectionPanel search={search} portal={state} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(state.forceRefresh).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(/20 estabelecimento\(s\) importado\(s\) nesta execução/)).toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(state.forceRefresh).toHaveBeenCalledTimes(1);
+  count = 40;
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(state.forceRefresh).toHaveBeenCalledTimes(2);
+  expect(screen.getByText(/40 estabelecimento\(s\) importado\(s\) nesta execução/)).toBeInTheDocument();
+  view.unmount();
+});

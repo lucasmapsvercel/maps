@@ -4,6 +4,7 @@ export const collectionJobSchema = z.object({
   id: z.string().min(1),
   status: z.enum(["pending", "running", "done", "failed"]),
   importedCount: z.number().int().nonnegative().optional(),
+  collectedSoFar: z.number().int().nonnegative().optional(),
   error: z.string().optional(),
   hasMore: z.boolean().optional(),
   requestsMade: z.number().int().nonnegative().optional(),

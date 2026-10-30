@@ -21,6 +21,11 @@ coleta real, ainda nao implementado. A interface atual funciona com:
 | `GET /api/health` | Liveness sem banco |
 | `GET /api/ready` | Configuracao, ping Mongo e marcador de migracao |
 
+O progresso dos jobs inclui `collectedSoFar` (quantidade ja importada nesta
+execucao), alem de `requestsMade`, limite, status e resumo final. Jobs antigos
+sem esse contador continuam compativeis. O painel atualiza os resultados
+durante a execucao quando o contador aumenta, sem disparar chamadas Google.
+
 Comandos: `addSearch`, `deleteSearch`, `openSearch`, `closeTab`, `navigate`, `setFilter`,
 `toggleFavorite`, `toggleHidden`, `addComment`, `editPlace`, `clearOverrides`.
 Schemas estritos em `src/domain/portal-command.ts`. Comando recebe somente
@@ -44,7 +49,9 @@ Falhas inesperadas continuam sendo propagadas.
 A resposta e `{ municipalities, source: "ibge" | "backup", updatedAt }`;
 `updatedAt` e a data de obtencao do catalogo, nao sua validade normativa.
 Quando usa reserva, o servidor registra `ibge_catalog_backup` e a interface
-exibe um aviso com a data, sem bloquear a selecao. A validacao de `addSearch`
+exibe apenas "Base de municipios de DD/MM/AAAA", sem detalhes tecnicos ou
+aviso de indisponibilidade. Durante a consulta, o seletor indica carregamento.
+A selecao continua disponivel com a reserva. A validacao de `addSearch`
 usa o mesmo mecanismo. Nao ha catalogo inventado, escolha automatica ou lista
 vazia com aparencia de sucesso. O navegador filtra localmente, sem chamadas
 por tecla. Nao ha chave nem consumo de cota Google nesse fluxo.
