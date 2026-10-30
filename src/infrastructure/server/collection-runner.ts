@@ -12,6 +12,9 @@ import { loadCollectionConfig } from "./collection-config";
 import { GOOGLE_TEXT_SEARCH_PAGE_SIZE, type CollectionQuota } from "../../domain/collection-config";
 import { googleBudgetPeriod, type GoogleSearchRequest } from "./google-search-budget";
 import { enqueueCollectionWorkflow } from "./collection-workflow-start";
+import { neighborhoodPlan } from "./ibge-neighborhoods";
+import type { Neighborhood } from "../ibge-neighborhood-catalog";
+import type { CollectionCoverage } from "../../domain/collection-coverage";
 
 export interface CollectionJob extends Omit<CollectionJobInfo, "id" | "createdAt" | "startedAt" | "finishedAt"> {
   _id: string;
@@ -38,6 +41,7 @@ export function serializeCollectionJob(job: CollectionJob): CollectionJobInfo {
     id: job._id, status: job.status, importedCount: job.importedCount, error: job.error, hasMore: job.hasMore,
     requestsMade: job.requestsMade, maxRequestsPerRun: job.maxRequestsPerRun,
     collectedSoFar: job.collectedSoFar,
+    coverage: job.coverage,
     createdAt: job.createdAt.toISOString(), startedAt: job.startedAt?.toISOString(), finishedAt: job.finishedAt?.toISOString()
   };
 }
@@ -52,6 +56,21 @@ interface CollectionCursor {
   exhausted: boolean;
   lastRequestId?: string;
   blocked?: boolean;
+  neighborhoods?: Neighborhood[];
+  coverage?: CollectionCoverage;
+}
+
+function cursorCoverage(cursor: CollectionCursor): CollectionCoverage {
+  return cursor.coverage ?? { mode: "municipality", total: 0, completed: 0, reason: "legacy_cursor" };
+}
+
+export async function getCollectionCoverage(workspaceId: string, searchId: string, db: Db): Promise<CollectionCoverage> {
+  const workspace = await db.collection<{ _id: string; data: { searches: SavedSearch[] } }>("portalWorkspaces")
+    .findOne({ _id: workspaceId });
+  const search = workspace?.data.searches.find((item) => item.id === searchId && !item.demo);
+  if (!search) throw new PortalError(404, "SEARCH_NOT_FOUND", "Busca não encontrada.");
+  const cursor = await db.collection<CollectionCursor>("collectionCursors").findOne({ _id: cursorId(workspaceId, searchId) });
+  return cursor ? cursorCoverage(cursor) : neighborhoodPlan(search).coverage;
 }
 
 function cursorId(workspaceId: string, searchId: string) {
@@ -89,7 +108,7 @@ export async function startCollectionJob(
           throw new PortalError(409, "COLLECTION_CURSOR_UNAVAILABLE",
             "Esta busca antiga não possui continuação confiável salva. Não reiniciamos a consulta para evitar repetições. Crie uma nova busca para iniciar uma sequência paginada.");
         }
-        cursor = { _id: id, workspaceId: actor.workspaceId, searchId, buffer: [], exhausted: false };
+        cursor = { _id: id, workspaceId: actor.workspaceId, searchId, buffer: [], exhausted: false, ...neighborhoodPlan(search) };
         await cursors.insertOne(cursor, { session });
       }
       if (cursor.activeJobId) throw new PortalError(409, "COLLECTION_ALREADY_RUNNING", "Já existe uma coleta em andamento para esta busca.");
@@ -111,6 +130,7 @@ export async function startCollectionJob(
         collectedSoFar: 0,
         importedPages: 0,
         workflowVersion: 1,
+        coverage: cursorCoverage(cursor),
         billingScope,
         createdAt: new Date()
       }, { session });
@@ -218,6 +238,9 @@ export async function planCollectionJob(jobId: string, db: Db) {
   const active = await runningCollection(jobId, db);
   if (!active) return null;
   const { job, cursor } = active;
+  await db.collection<CollectionJob>("collectionJobs").updateOne({ _id: jobId, status: "running" }, {
+    $set: { coverage: cursorCoverage(cursor), updatedAt: new Date() }
+  });
   if (cursor.blocked && cursor.buffer.length === 0) {
     throw new PortalError(409, "COLLECTION_RESPONSE_UNCERTAIN",
       "Uma chamada anterior foi interrompida sem resposta salva. Os dados recebidos foram preservados. Crie uma nova busca; não repetimos automaticamente uma chamada de resultado incerto.");
@@ -245,8 +268,13 @@ export async function fetchCollectionPage(jobId: string, requestIndex: number, a
       "Uma chamada foi contabilizada, mas sua página não foi salva. Não repetimos essa chamada automaticamente. Crie uma nova busca para consultar novamente.");
   }
   if (job.requestsMade !== requestIndex) throw new PortalError(409, "COLLECTION_CHECKPOINT_CONFLICT", "O progresso da coleta mudou. Nenhuma nova chamada foi realizada.");
+  const coverage = cursorCoverage(cursor);
+  const neighborhood = cursor.neighborhoods?.[coverage.completed];
+  if (coverage.mode === "neighborhoods" && !neighborhood) {
+    throw new PortalError(409, "COLLECTION_CHECKPOINT_CONFLICT", "Bairro atual não encontrado no plano salvo da coleta.");
+  }
   const result = await new LoggedGoogleSearch(client, db, new GoogleTextSearchProvider(apiKey)).search(actor, {
-    requestId, searchId: job.searchId, term: job.term, city: job.city,
+    requestId, searchId: job.searchId, term: job.term, city: neighborhood ? `${neighborhood.name}, ${job.city}` : job.city,
     source: "collection", limit: Number(process.env.GOOGLE_PLACES_MONTHLY_LIMIT) || 0,
     billingScope: job.billingScope ?? missingBillingScope(), pageToken: cursor.nextPageToken, collectionJobId: jobId
   });
@@ -254,11 +282,17 @@ export async function fetchCollectionPage(jobId: string, requestIndex: number, a
     await db.collection<CollectionCursor>("collectionCursors").updateOne({ _id: cursor._id, activeJobId: jobId }, { $set: { blocked: true } });
     throw new PortalError(502, "GOOGLE_PAGINATION_STALLED", "O Google repetiu o token de paginação. A coleta foi interrompida para evitar consultas repetidas.");
   }
+  const completed = coverage.mode === "neighborhoods" && !result.nextPageToken ? coverage.completed + 1 : coverage.completed;
+  const nextNeighborhood = cursor.neighborhoods?.[completed];
+  const nextCoverage: CollectionCoverage = coverage.mode === "neighborhoods" ? {
+    mode: "neighborhoods", total: coverage.total, completed, catalogDate: coverage.catalogDate,
+    ...(nextNeighborhood ? { current: nextNeighborhood.name } : {})
+  } : coverage;
   const saved = await db.collection<CollectionCursor>("collectionCursors").updateOne(
     { _id: cursor._id, activeJobId: jobId, lastRequestId: { $ne: requestId } },
     {
       $push: { buffer: { $each: result.places } },
-      $set: { lastRequestId: requestId, exhausted: !result.nextPageToken,
+      $set: { lastRequestId: requestId, exhausted: !result.nextPageToken && !nextNeighborhood, coverage: nextCoverage,
         ...(result.nextPageToken ? { nextPageToken: result.nextPageToken } : {}) },
       ...(!result.nextPageToken ? { $unset: { nextPageToken: "" } } : {})
     }, { ignoreUndefined: true }
@@ -298,6 +332,7 @@ export async function finishCollectionJob(jobId: string, client: MongoClient, db
       const cursor = await cursors.findOne({ activeJobId: jobId }, { session });
       await jobs.updateOne({ _id: jobId }, { $set: {
         status: error ? "failed" : "done", finishedAt: new Date(), importedCount: job.collectedSoFar ?? 0,
+        ...(cursor ? { coverage: cursorCoverage(cursor) } : {}),
         ...(error ? { error } : { hasMore: Boolean(cursor && (cursor.buffer.length > 0 || !cursor.exhausted)) })
       } }, { session });
       await cursors.updateOne({ activeJobId: jobId }, { $unset: { activeJobId: "" } }, { session });

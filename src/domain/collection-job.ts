@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { collectionCoverageSchema } from "./collection-coverage";
 
 export const collectionJobSchema = z.object({
   id: z.string().min(1),
@@ -9,6 +10,7 @@ export const collectionJobSchema = z.object({
   hasMore: z.boolean().optional(),
   requestsMade: z.number().int().nonnegative().optional(),
   maxRequestsPerRun: z.number().int().positive().optional(),
+  coverage: collectionCoverageSchema.optional(),
   createdAt: z.iso.datetime().optional(),
   startedAt: z.iso.datetime().optional(),
   finishedAt: z.iso.datetime().optional()

@@ -24,6 +24,7 @@ HTML gerado pelo framework e nao e versionado.
 | `src/infrastructure/server/google-search-budget.ts` | Reserva mensal atomica e recibos sem conteudo do provedor |
 | `src/infrastructure/server/collection-runner.ts` | Jobs, cursor persistente, importacao de paginas e serializacao de progresso |
 | `src/infrastructure/server/ibge-municipalities.ts` | Catalogo oficial, cache e reserva validada para indisponibilidade do IBGE |
+| `src/infrastructure/server/ibge-neighborhoods.ts` | Plano automatico por codigo IBGE, nomes oficiais e fallback municipal explicito |
 | `src/infrastructure/ibge-catalog.ts` | Normalizacao e validacao do catalogo, compartilhadas com o atualizador |
 | `src/presentation` | Componentes TSX, formularios, fila de comandos e mensagens |
 | `scripts` | Migracao MongoDB e atualizacao da copia oficial IBGE, fora do build/deploy |

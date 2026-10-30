@@ -7,7 +7,7 @@
   de requisicoes por execucao, sempre com `pageSize=20`, sem retry automatico.
 - Campos: ID, nome, endereco, localizacao, categoria, telefone, site e
   atribuicoes; sem fotos, avaliacoes ou mapa JavaScript pago.
-- Cidade incluida no texto da consulta: nao ha filtro por poligono municipal,
+- Bairro (quando disponivel) e cidade incluidos no texto da consulta: nao ha filtro por poligono municipal,
   geocodificacao, grade ou garantia de pertencimento/cobertura do municipio.
 - O adaptador retorna atribuicoes; o filtro dos resultados salvos e local
   e nao faz novas chamadas. O painel atual e o de coleta incremental;
@@ -25,19 +25,21 @@ A coleta em segundo plano (`POST /api/v1/collection/run`) usa o limite de
 Configuracoes como **quantidade maxima de requisicoes por execucao**, nao
 como quantidade de estabelecimentos nem como teto acumulado da busca salva.
 O padrao e 100 requisicoes; sao aceitos inteiros entre 1 e 5000.
-Cada nova execucao tem seu proprio limite e continua da pagina anterior.
+Cada nova execucao tem seu proprio limite e continua do bairro/pagina anterior.
+O limite e compartilhado entre todos os bairros, nao multiplicado por bairro.
 
 A documentacao oficial consultada em 2026-10-30 define `pageSize` maximo de
 **20 resultados por requisicao**. O portal sempre solicita 20, inclusive nas
 paginas seguintes. Configurar 100 nao significa garantir 2000 resultados:
 Text Search (New) limita a mesma consulta a **60 resultados somando todas
 as paginas**, normalmente tres chamadas de 20. O Google pode retornar menos
-itens ou encerrar a paginacao antes. Nao ha
-varredura territorial nem consultas alternativas para contornar esse fim.
+itens ou encerrar a paginacao antes. Esse limite vale separadamente para cada
+consulta por bairro; nao ha pagina forcada, grade territorial ou garantia
+de obter todos os estabelecimentos.
 
 Exemplo: com limite 100 e cota mensal do sistema de 5000, uma execucao que
 realizar 100 chamadas consome 100 e deixa 4900 disponiveis. Se o Google
-encerrar apos 3 paginas, somente 3 sao consumidas. O limite mensal efetivo
+encerrar apos 3 paginas e nao houver outros bairros pendentes, somente 3 sao consumidas. O limite mensal efetivo
 continua sendo `GOOGLE_PLACES_MONTHLY_LIMIT`, compartilhado entre usuarios e
 workspaces do mesmo escopo. Nenhuma reserva antecipada de 100 e feita.
 
@@ -47,6 +49,46 @@ Se apenas o campo antigo existir, aplica-se o novo padrao de 100; ao salvar,
 o campo antigo e removido. Jobs novos salvam `maxRequestsPerRun` e
 `requestsMade`, expostos nos endpoints de progresso. O limite vigente no
 inicio do job e preservado mesmo se a configuracao mudar durante a execucao.
+
+### Todos os bairros automaticamente
+
+Novas buscas com municipio selecionado pelo codigo IBGE usam todos os nomes
+de bairros disponiveis no catalogo oficial incluido no deploy. Nao ha selecao
+manual de bairros. A copia da malha de bairros do Censo 2022 publicada pelo
+IBGE em novembro de 2024 contem **17.575 bairros em 895 municipios**; Belem/PA
+possui **71**, incluindo Cremacao, Nazare e Tenone. Isso nao cobre todos os
+municipios brasileiros nem garante refletir alteracoes territoriais recentes.
+Fonte: [IBGE, bairros CD2022](https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/bairros/shp/BR/).
+
+O plano usa nomes em ordem alfabetica. Bairros homonimos no mesmo municipio
+sao agrupados, pois gerariam a mesma consulta textual. Cada consulta usa
+`<termo> em <bairro>, <municipio/UF/pais da busca>`, sem geocodificacao paga,
+geometria ou filtro estrito de pertencimento ao bairro. Resultados proximos
+podem aparecer e sao deduplicados por Place ID entre todas as paginas/bairros.
+Quando nao ha `nextPageToken`, avanca para o proximo bairro sem reutilizar o
+token anterior, inclusive se a resposta estiver vazia. Cada pagina efetivamente
+solicitada consome uma requisicao, mesmo que todos os seus resultados se repitam.
+
+O plano e copiado para o cursor na primeira execucao: lista, ordem, ano da
+base, bairro atual e token nao mudam durante retomadas, mesmo apos atualizar o
+catalogo. O progresso mostra bairro atual, quantidade concluida e total.
+Ao atingir o teto global da execucao, continuar retoma o mesmo bairro/token,
+sem voltar aos bairros concluidos. A cota mensal continua unica.
+
+Municipios sem catalogo e buscas sem codigo IBGE consultam o municipio
+inteiro e mostram explicitamente "Divisao por bairros indisponivel".
+Cursores anteriores permanecem no fluxo municipal para evitar repetir
+consultas; a interface orienta criar outra busca para adotar os bairros.
+Falha de carregamento/validacao nao vira fallback silencioso: bloqueia o
+inicio e mostra erro. A consulta direta continua sendo apenas uma pagina
+municipal, sem percorrer bairros.
+
+`npm.cmd run neighborhoods:update` baixa o ZIP oficial, extrai apenas os
+atributos DBF e valida codigos, nomes, unicidade e volume nacional antes de
+substituir `src/infrastructure/data/ibge-neighborhoods.json`. Aceita tambem
+o caminho de um ZIP oficial previamente baixado como argumento.
+Nao inclui geometrias nem faz download durante a coleta ou o build.
+Atualizacoes devem ser revisadas e publicadas em novo deploy.
 
 O cursor de cada busca/workspace fica em `collectionCursors`: proxima pagina,
 itens da pagina ainda nao importados e indicacao de esgotamento. Cada pagina
@@ -59,10 +101,10 @@ nao faz parte dos logs de consultas e nao e exposto pelos endpoints de jobs.
 A pagina e salva antes da importacao, e o cursor so descarta itens apos
 importacao bem-sucedida. Falhas preservam o cursor; registros ja importados
 sao reconhecidos por Place ID. Apenas um job por busca pode executar por vez.
-A proxima pagina e solicitada enquanto a atual e importada, se houver token,
+A proxima pagina ou primeiro pedido do bairro seguinte e solicitado enquanto a atual e importada, se houver continuacao,
 limite por execucao e cota disponivel. Ha no maximo uma chamada Google em
-andamento por job e uma pagina antecipada, sem consultas especulativas alem
-da paginacao. O buffer pode conter ate duas paginas nesse fluxo; dados antigos
+andamento por job e uma pagina antecipada, sem consultas fora do plano salvo.
+O buffer pode conter ate duas paginas nesse fluxo; dados antigos
 maiores sao drenados em grupos de ate 20 antes de antecipar novas paginas.
 Acrescentar resultados e remover o prefixo importado sao operacoes atomicas,
 evitando perder a pagina seguinte se ela chegar durante a importacao.
@@ -72,7 +114,7 @@ falhar; os dados recebidos ficam salvos para retomar sem outra chamada.
 
 A interface restaura o ultimo job ao reabrir a busca e permite continuar mesmo
 independentemente do total de estabelecimentos salvos. `hasMore: false` indica
-que o Google nao enviou proxima pagina e nao ha itens pendentes no buffer;
+que nao ha pagina nem bairro pendente e nao ha itens pendentes no buffer;
 novas coletas sao bloqueadas sem consumir cota.
 O progresso inclui `collectedSoFar`; a cada leitura de progresso (intervalo
 de 2,5 segundos apos a anterior), resultados salvos e cota sao atualizados
@@ -205,7 +247,11 @@ Paginas `/terms` e `/privacy` descrevem o fluxo e vinculam termos/privacidade
 Google. O responsavel deve revisar e complementar identidade do controlador,
 contato, base legal e retencao de dados internos antes de habilitar para uso
 publico. A flag de reconhecimento nao substitui revisao contratual/juridica.
-Nao usar consultas repetidas para varredura sistematica ou formar um diretorio.
+Consultar todos os bairros nao concede permissao para extracao em massa ou
+formacao de diretorio. Antes de ativar a coleta automatica, valide expressamente
+esse uso e a retencao contra o contrato aplicavel; mantenha a coleta desativada
+quando nao houver autorizacao. Nao usar a divisao por bairros para contornar
+restricoes contratuais do provedor.
 
 Nao assumimos direito de armazenar todos os campos por um prazo generico.
 A coleta atual grava IDs e dados retornados no workspace e no buffer de

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "check": "tsc --noEmit",
     "municipalities:update": "node --experimental-strip-types scripts/update-ibge-municipalities.ts",
+    "neighborhoods:update": "node --experimental-strip-types scripts/update-ibge-neighborhoods.ts",
     "db:migrate": "node --experimental-strip-types --env-file=.env.migrate scripts/migrate-mongo.ts",
     "test:integration": "vitest run tests/mongo.integration.test.ts"
   },
@@ -41,6 +42,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "jsdom": "^27.1.0",
+    "fflate": "^0.8.2",
     "mongodb-memory-server": "^11.3.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0"

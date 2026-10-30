@@ -70,7 +70,11 @@ e exibe logs com request/response sanitizados, retidos por 30 dias.
 A coleta usa Vercel Workflow para executar etapas duraveis, com checkpoints
 transacionais no MongoDB. Reentregas nao repetem paginas ja salvas nem
 importacoes confirmadas; chamadas com resposta incerta nao sao reenviadas.
-Nao ha mapa Google pago nem varredura municipal.
+Novas buscas consultam automaticamente todos os bairros disponiveis no
+catalogo IBGE 2022 (71 em Belem), com limite compartilhado, progresso por
+bairro e deduplicacao. Sem catalogo, consultam o municipio inteiro com aviso;
+cursores antigos nao sao reiniciados. Nao ha mapa Google pago nem varredura
+por grade geografica ou garantia de cobertura completa.
 Criar busca nao consulta o Google; e necessario confirmar a coleta.
 A integracao fica bloqueada
 ate configurar chave, politicas e parcela disponivel da franquia compartilhada.
@@ -96,6 +100,13 @@ O comando valida formato, codigos unicos, quantidade minima e todas as UFs
 antes de substituir o arquivo. Revise e versione a atualizacao antes de
 publicar. O catalogo de reserva nao e atualizado automaticamente no deploy;
 veja os detalhes de cache e resposta em [Dados e API](docs/03-dados-e-api.md).
+
+O catalogo separado de bairros inclui 17.575 registros em 895 municipios,
+nao todos os municipios do pais. Para atualizar os nomes a partir da malha
+oficial do Censo 2022, execute `npm.cmd run neighborhoods:update`, revise os
+dados e publique novo deploy. Os planos de coleta ja iniciados nao mudam.
+Veja [coleta automatica por bairros](docs/09-google-places.md#todos-os-bairros-automaticamente),
+inclusive as restricoes de cobertura e a revisao contratual necessaria.
 
 ### Publicar na Vercel
 

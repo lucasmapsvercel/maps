@@ -26,10 +26,13 @@ import type { GoogleSearchDetailsDocument } from "../src/infrastructure/server/l
 import { IbgeMunicipalities, ibgeMunicipalities } from "../src/infrastructure/server/ibge-municipalities";
 import {
   startCollectionJob, getCollectionJob, getQuotaUsage, prepareCollectionJob, planCollectionJob,
-  fetchCollectionPage, importCollectionPage, finishCollectionJob
+  fetchCollectionPage, importCollectionPage, finishCollectionJob, getCollectionCoverage
 } from "../src/infrastructure/server/collection-runner";
 import { GET as getCollectionConfig, PUT as putCollectionConfig } from "../src/app/api/v1/collection/config/route";
 import { recoverInterruptedCollection } from "../src/infrastructure/server/collection-recovery";
+import type { Municipality } from "../src/domain/municipality";
+import { neighborhoodPlan } from "../src/infrastructure/server/ibge-neighborhoods";
+import { GET as getCollectionPlan } from "../src/app/api/v1/collection/plan/route";
 
 let server: MongoMemoryReplSet;
 let client: MongoClient;
@@ -93,12 +96,14 @@ async function setRequestLimit(maxRequestsPerRun: number) {
     .updateOne({ _id: "global" }, { $set: { maxRequestsPerRun } }, { upsert: true });
 }
 
-async function pausedCollection(workspaceId: string) {
+async function pausedCollection(workspaceId: string, municipality?: Municipality, limit = 10) {
   vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
-  await setRequestLimit(10);
+  await setRequestLimit(limit);
   const actor = { ...alice, workspaceId };
   const initial = await store.load(actor);
-  const saved = await store.execute(actor, { type: "addSearch", term: "Durável", city: "Belém" }, initial.version);
+  const saved = await store.execute(actor, {
+    type: "addSearch", term: "Durável", city: "Belém, Pará, Brasil", ...(municipality ? { municipality } : {})
+  }, initial.version);
   const search = saved.state.searches[0];
   const scope = randomUUID();
   const enqueue = workflowHarness.enqueue;
@@ -109,6 +114,145 @@ async function pausedCollection(workspaceId: string) {
   await prepareCollectionJob(id, db);
   return { id, actor, search, scope };
 }
+
+const belem: Municipality = { ibgeCode: "1501402", name: "Belém", stateCode: "PA", stateName: "Pará", country: "Brasil" };
+
+test("all Belem neighborhoods paginate automatically with a shared limit, persisted resume and deduplication", async () => {
+  const { id, actor, search, scope } = await pausedCollection("neighborhood-flow", belem, 3);
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "5000");
+  const areas = neighborhoodPlan(search).neighborhoods!;
+  expect(areas).toHaveLength(71);
+  const requests: Array<{ textQuery: string; pageToken?: string; pageSize: number }> = [];
+  const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    const body = JSON.parse(String(options?.body));
+    requests.push(body);
+    return Response.json({
+      places: [{ id: "shared-place" }, { id: `unique-${requests.length}` }],
+      ...(requests.length === 1 ? { nextPageToken: "first-neighborhood-page2" } : {})
+    });
+  });
+  while (true) {
+    const plan = (await planCollectionJob(id, db))!;
+    if (plan.done) break;
+    await Promise.all([
+      plan.fetchPage ? fetchCollectionPage(id, plan.requestIndex, "fixture", client, db) : Promise.resolve(),
+      plan.importPage ? importCollectionPage(id, plan.importIndex, client, db) : Promise.resolve()
+    ]);
+  }
+  await finishCollectionJob(id, client, db);
+  expect(await getCollectionJob(id, actor.workspaceId, db)).toMatchObject({
+    status: "done", requestsMade: 3, importedCount: 4, hasMore: true,
+    coverage: { mode: "neighborhoods", total: 71, completed: 2, current: areas[2].name }
+  });
+  expect(requests.map((request) => request.pageToken)).toEqual([undefined, "first-neighborhood-page2", undefined]);
+  expect(requests.map((request) => request.textQuery)).toEqual([
+    `Durável em ${areas[0].name}, ${search.city}`, `Durável em ${areas[0].name}, ${search.city}`,
+    `Durável em ${areas[1].name}, ${search.city}`
+  ]);
+  await setRequestLimit(100);
+  const resumed = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  await vi.waitFor(async () => expect((await getCollectionJob(resumed, actor.workspaceId, db))?.status).toBe("done"), { timeout: 30000 });
+  expect(await getCollectionJob(resumed, actor.workspaceId, db)).toMatchObject({
+    status: "done", requestsMade: 69, importedCount: 69, hasMore: false,
+    coverage: { mode: "neighborhoods", total: 71, completed: 71 }
+  });
+  expect(requests.slice(3).map((request) => request.textQuery)).toEqual(
+    areas.slice(2).map((area) => `Durável em ${area.name}, ${search.city}`)
+  );
+  expect(requests.slice(3).every((request) => !request.pageToken)).toBe(true);
+  expect(requests.every((request) => request.pageSize === 20)).toBe(true);
+  const ids = (await store.load(actor)).state.searches[0].placeIds;
+  expect(ids).toHaveLength(73);
+  expect(new Set(ids).size).toBe(73);
+  expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 72 });
+  const cursor = await db.collection("collectionCursors").findOne({ searchId: search.id });
+  expect(cursor?.buffer).toEqual([]);
+  expect(cursor?.nextPageToken).toBeUndefined();
+  expect(cursor?.coverage).not.toHaveProperty("current");
+  const log = await db.collection("googleSearchRequests").findOne({ searchId: search.id });
+  expect(log?.city).toContain(areas[0].name);
+  await expect(startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db))
+    .rejects.toMatchObject({ code: "COLLECTION_EXHAUSTED" });
+  expect(transport).toHaveBeenCalledTimes(72);
+}, 40000);
+
+test("a replayed last page advances the neighborhood only once after lost acknowledgement", async () => {
+  const { id, actor, search } = await pausedCollection("neighborhood-replay", belem);
+  const transport = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ places: [] }));
+  const updateOne = Collection.prototype.updateOne;
+  vi.spyOn(Collection.prototype, "updateOne").mockImplementation(async function (this: Collection, ...args) {
+    const result = await updateOne.apply(this, args);
+    if (this.collectionName === "collectionCursors" && "$push" in args[1]) throw new Error("Acknowledgement lost");
+    return result;
+  });
+  await expect(fetchCollectionPage(id, 0, "fixture", client, db)).rejects.toThrow("Acknowledgement lost");
+  await fetchCollectionPage(id, 0, "fixture", client, db);
+  const cursor = await db.collection("collectionCursors").findOne({ searchId: search.id });
+  expect(cursor?.coverage).toMatchObject({ completed: 1, total: 71 });
+  expect(transport).toHaveBeenCalledTimes(1);
+  await finishCollectionJob(id, client, db);
+  expect(await getCollectionJob(id, actor.workspaceId, db)).toMatchObject({ hasMore: true });
+});
+
+test("a request limit reached inside a neighborhood preserves its token and resumes the same query", async () => {
+  const { id, actor, search, scope } = await pausedCollection("neighborhood-token-resume", belem, 1);
+  const transport = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ places: [{ id: "first" }], nextPageToken: "same-neighborhood-next" }))
+    .mockResolvedValueOnce(Response.json({ places: [{ id: "second" }] }));
+  await fetchCollectionPage(id, 0, "fixture", client, db);
+  await importCollectionPage(id, 0, client, db);
+  expect((await planCollectionJob(id, db))?.done).toBe(true);
+  await finishCollectionJob(id, client, db);
+  expect(await getCollectionJob(id, actor.workspaceId, db)).toMatchObject({
+    requestsMade: 1, hasMore: true, coverage: { completed: 0, current: "Aeroporto" }
+  });
+  const resumed = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  expect(await waitForJob(resumed, actor.workspaceId)).toMatchObject({
+    status: "done", requestsMade: 1, hasMore: true, coverage: { completed: 1, current: "Água Boa" }
+  });
+  const bodies = transport.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+  expect(bodies.map((body) => body.pageToken)).toEqual([undefined, "same-neighborhood-next"]);
+  expect(bodies[0].textQuery).toBe(bodies[1].textQuery);
+  expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 2 });
+});
+
+test("monthly quota is shared between neighborhoods and empty results advance without extra charges", async () => {
+  const { id, actor, scope } = await pausedCollection("neighborhood-monthly-quota", belem);
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "1");
+  const transport = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ places: [] }));
+  await fetchCollectionPage(id, 0, "fixture", client, db);
+  expect(await planCollectionJob(id, db)).toMatchObject({ done: false, fetchPage: true, requestIndex: 1 });
+  await expect(fetchCollectionPage(id, 1, "fixture", client, db)).rejects.toMatchObject({ code: "GOOGLE_MONTHLY_LIMIT" });
+  await finishCollectionJob(id, client, db, "Cota mensal atingida");
+  expect(await getCollectionJob(id, actor.workspaceId, db)).toMatchObject({
+    status: "failed", requestsMade: 1, coverage: { completed: 1, total: 71 }
+  });
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 1, remaining: 0 });
+});
+
+test("coverage preview is workspace scoped, uses municipal fallback and never calls Google", async () => {
+  const { id, actor, search } = await pausedCollection("neighborhood-preview", belem);
+  vi.spyOn(auth, "currentActor").mockResolvedValue(actor);
+  const transport = vi.spyOn(globalThis, "fetch");
+  const preview = new Request(`http://localhost:3000/api/v1/collection/plan?searchId=${search.id}`);
+  vi.stubEnv("MONGODB_URI", server.getUri());
+  vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
+  expect(await (await getCollectionPlan(preview)).json()).toMatchObject({
+    mode: "neighborhoods", total: 71, completed: 0, catalogDate: "2022"
+  });
+  vi.spyOn(auth, "currentActor").mockResolvedValue({ ...actor, workspaceId: "another-workspace" });
+  expect((await getCollectionPlan(preview)).status).toBe(404);
+  const missing = await pausedCollection("neighborhood-missing", { ...belem, ibgeCode: "1500131", name: "Abel Figueiredo" });
+  expect(await getCollectionCoverage(missing.actor.workspaceId, missing.search.id, db)).toMatchObject({
+    mode: "municipality", reason: "catalog_unavailable"
+  });
+  await db.collection("collectionCursors").updateOne({ searchId: search.id }, { $unset: { coverage: "", neighborhoods: "" } });
+  expect(await getCollectionCoverage(actor.workspaceId, search.id, db)).toMatchObject({ mode: "municipality", reason: "legacy_cursor" });
+  expect(transport).not.toHaveBeenCalled();
+  await finishCollectionJob(id, client, db);
+  await finishCollectionJob(missing.id, client, db);
+});
 
 test("durable steps replay saved pages and committed imports without repeating Google or counters", async () => {
   const { id, actor, scope } = await pausedCollection("durable-replay");

@@ -14,6 +14,7 @@ coleta real, ainda nao implementado. A interface atual funciona com:
 | `POST /api/v1/collection` | Consulta Google explicita, uma pagina temporaria; valida flag, chave, politicas e reserva mensal |
 | `POST/GET /api/v1/collection/run` | Inicia coleta paginada / lista os ultimos jobs de uma busca |
 | `GET /api/v1/collection/run/:jobId` | Progresso de um job do workspace |
+| `GET /api/v1/collection/plan?searchId=...` | Previa local dos bairros ou fallback municipal, isolada por workspace |
 | `GET/PUT /api/v1/collection/config` | Limite de requisicoes por execucao |
 | `GET /api/v1/collection/quota` | Consumo mensal, saldo e limite por execucao |
 | `GET /api/v1/collection/logs` | Historico de consultas do workspace |
@@ -25,6 +26,23 @@ O progresso dos jobs inclui `collectedSoFar` (quantidade ja importada nesta
 execucao), alem de `requestsMade`, limite, status e resumo final. Jobs antigos
 sem esse contador continuam compativeis. O painel atualiza os resultados
 durante a execucao quando o contador aumenta, sem disparar chamadas Google.
+
+O campo opcional `coverage` nos jobs e a previa do plano usam
+`{ mode: "neighborhoods" | "municipality", total, completed, current?,
+catalogDate?, reason? }`. `catalogDate` e o ano de referencia IBGE, nao a data
+de download. `current` e o bairro da proxima chamada; `reason` municipal e
+`catalog_unavailable` ou `legacy_cursor`. Nao sao expostos tokens nem a lista
+interna de bairros. Jobs historicos preservam o resumo da propria execucao.
+A previa nao grava cursor, nao consulta IBGE/Google e nao consome cota.
+
+O primeiro job salva no cursor uma copia dos bairros do municipio identificado
+pelo codigo IBGE e o progresso em `coverage`. Fim de paginas avanca um bairro;
+fim do plano define `exhausted`. `nextPageToken` pertence somente ao bairro
+atual. Uma unica reserva mensal e um unico contador por job cobrem todo o
+plano. Importacao deduplica Place IDs inclusive entre bairros. Cursores
+anteriores sem plano continuam municipais, sem migracao ou repeticao.
+O catalogo local versionado e validado e descrito em
+[Google Places](09-google-places.md#todos-os-bairros-automaticamente).
 
 Jobs novos usam Vercel Workflow e armazenam internamente `workflowVersion`,
 `workflowRunId`, `billingScope`, `importedPages` e `updatedAt`, sem expor esses

@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { SavedSearch } from "../../domain/types";
 import type { Portal } from "../use-portal";
 import { collectionJobSchema, type CollectionJobInfo } from "../../domain/collection-job";
+import { collectionCoverageSchema, type CollectionCoverage } from "../../domain/collection-coverage";
 import {
   collectionQuotaSchema, DEFAULT_COLLECTION_REQUESTS, GOOGLE_TEXT_SEARCH_PAGE_SIZE, type CollectionQuota
 } from "../../domain/collection-config";
@@ -16,6 +17,7 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
   const [error, setError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyFailed, setHistoryFailed] = useState(false);
+  const [coverage, setCoverage] = useState<CollectionCoverage | null>(null);
   const pollingJobId = activeJob?.status === "pending" || activeJob?.status === "running" ? activeJob.id : null;
 
   const fetchQuota = useCallback(async (signal?: AbortSignal) => {
@@ -34,6 +36,11 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
   }, [fetchQuota]);
   useEffect(() => {
     const controller = new AbortController();
+    setHistoryLoading(true);
+    setHistoryFailed(false);
+    setActiveJob(null);
+    setCoverage(null);
+    setError("");
     async function loadHistory() {
       try {
         const res = await fetch(`/api/v1/collection/run?searchId=${encodeURIComponent(search.id)}`, {
@@ -41,7 +48,18 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
         });
         if (!res.ok) throw new Error("Não foi possível carregar o progresso da coleta.");
         const jobs = z.array(collectionJobSchema).parse(await res.json());
-        if (!controller.signal.aborted) setActiveJob(jobs[0] ?? null);
+        let plan = jobs[0]?.coverage;
+        if (!plan) {
+          const response = await fetch(`/api/v1/collection/plan?searchId=${encodeURIComponent(search.id)}`, {
+            cache: "no-store", signal: controller.signal
+          });
+          if (!response.ok) throw new Error("Não foi possível carregar o plano da coleta.");
+          plan = collectionCoverageSchema.parse(await response.json());
+        }
+        if (!controller.signal.aborted) {
+          setActiveJob(jobs[0] ?? null);
+          setCoverage(plan);
+        }
       } catch {
         if (!controller.signal.aborted) {
           setHistoryFailed(true);
@@ -105,7 +123,7 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
       }
       const parsed = z.object({ jobId: z.string().min(1) }).safeParse(body);
       if (!parsed.success) throw new Error("O servidor retornou uma confirmação de coleta inválida. Reabra a busca para verificar o progresso.");
-      setActiveJob({ id: parsed.data.jobId, status: "pending" });
+      setActiveJob({ id: parsed.data.jobId, status: "pending", ...(coverage ? { coverage } : {}) });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao iniciar a coleta.");
     } finally {
@@ -121,16 +139,33 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
   const canStart = quota !== null && !exhausted && !running && !starting && !historyLoading && !historyFailed;
 
   const usedPct = quota?.limit ? Math.min(100, (quota.used / quota.limit) * 100) : 0;
+  const progress = activeJob?.coverage ?? coverage;
 
   return (
     <section className="page-card" aria-label="Coleta de estabelecimentos">
       <h2>Coletar estabelecimentos</h2>
+      {historyLoading ? <p role="status">Carregando plano da coleta…</p> : progress && (
+        <div aria-label="Abrangência da coleta">
+          {progress.mode === "neighborhoods" ? <>
+            <p>Consulta automática a todos os {progress.total} bairros disponíveis. Base IBGE: {progress.catalogDate}.</p>
+            <p>{progress.completed} de {progress.total} bairros concluídos.
+              {progress.current && <> {running ? "Consultando" : "Próximo bairro"}: {progress.current} — bairro {progress.completed + 1} de {progress.total}.</>}
+            </p>
+            <p>O limite de {limit} requisições é compartilhado entre todos os bairros, não por bairro.
+              Os resultados podem incluir locais próximos e não garantem cobertura completa.</p>
+          </> : <p>{progress.reason === "legacy_cursor"
+            ? "Esta busca mantém a consulta municipal anterior para evitar repetições. Crie uma nova busca para consultar automaticamente os bairros disponíveis."
+            : "Divisão por bairros indisponível. A consulta será feita para o município inteiro."}</p>}
+        </div>
+      )}
 
       <div className={`collection-state ${exhausted ? "state-full" : "state-partial"}`}>
         <div>
           <strong>{alreadyCollected} estabelecimentos coletados</strong>
           <p>{exhausted ? "O Google não disponibilizou mais resultados. Nenhuma nova chamada será feita."
-            : `Cada execução realiza até ${limit} requisições, continuando de onde a anterior parou. Cada requisição solicita até ${GOOGLE_TEXT_SEARCH_PAGE_SIZE} resultados; a coleta para quando não houver mais páginas.`}</p>
+            : `Cada execução realiza até ${limit} requisições, continuando de onde a anterior parou. Cada requisição solicita até ${GOOGLE_TEXT_SEARCH_PAGE_SIZE} resultados; ${progress?.mode === "neighborhoods"
+              ? "ao terminar as páginas de um bairro, a coleta segue para o próximo, até concluir o plano ou atingir o limite."
+              : "a coleta para quando não houver mais páginas."}`}</p>
         </div>
       </div>
 
