@@ -20,6 +20,8 @@ HTML gerado pelo framework e nao e versionado.
 | `src/infrastructure/server/mongo-portal-store.ts` | Unidade de trabalho transacional, versao, views e auditoria |
 | `src/infrastructure/server/mongo-schema.ts` | Migracao idempotente, validadores e indices |
 | `src/infrastructure/server/api.ts` | Autorizacao, origem, tamanho do corpo e respostas de erro |
+| `src/infrastructure/server/google-places-provider.ts` | Text Search Pro, uma pagina, respostas temporarias e erros sem retry |
+| `src/infrastructure/server/google-search-budget.ts` | Reserva mensal atomica e recibos sem conteudo do provedor |
 | `src/presentation` | Componentes TSX, formularios, fila de comandos e mensagens |
 | `scripts` | Migracao do schema no MongoDB Atlas, fora do build/deploy |
 | `tests` | Dominio, React, SSR, API, politica OAuth e integracao Mongo |
@@ -62,7 +64,9 @@ Nao afirmar atendimento dos cenarios de carga, retencao de provedor ou coleta.
 Para volumes maiores e coleta real, migrar por versao para colecoes
 normalizadas/paginacao antes de elevar o limite. Nao introduzir provider
 snapshots em um agregado irrestrito. Mantem-se pendente a escolha de fonte,
-malha municipal licenciada, politica de retencao e orcamento.
+malha municipal licenciada, politica de retencao e orcamento para coleta
+municipal. A consulta Google explicita em lista e uma integracao distinta,
+sem persistencia dos resultados; veja [Google Places](09-google-places.md).
 
 Worker de coleta devera ser processo separado com fila duravel, leases,
 checkpoints e limites. Nao executar coleta longa em Route Handler ou

@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
@@ -14,6 +14,7 @@ import * as auth from "../src/infrastructure/server/auth";
 import { GET, POST } from "../src/app/api/v1/portal/route";
 import { POST as collect } from "../src/app/api/v1/collection/route";
 import { mongoClient } from "../src/infrastructure/server/mongo";
+import { GoogleSearchBudget } from "../src/infrastructure/server/google-search-budget";
 
 let server: MongoMemoryReplSet;
 let client: MongoClient;
@@ -147,4 +148,70 @@ test("rate limit allows exactly 300 mutations per minute and rejects the next", 
   await expect(consumeMutationLimit(db, actor, now)).rejects.toMatchObject({ status: 429 });
   await expect(consumeMutationLimit(db, { ...actor, userId: "other-user" }, now)).resolves.toBeUndefined();
   await expect(consumeMutationLimit(db, actor, now + 60000)).resolves.toBeUndefined();
+});
+
+test("Google monthly reservations enforce exact limit across workspaces concurrently and never store provider data", async () => {
+  const budget = new GoogleSearchBudget(client, db);
+  const scope = randomUUID();
+  const results = await Promise.allSettled(Array.from({ length: 8 }, (_, index) =>
+    budget.reserve(index % 2 ? alice : outsider, randomUUID(), 3, scope)));
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(3);
+  for (const result of results) {
+    if (result.status === "rejected") expect(result.reason).toMatchObject({ status: 429, code: "GOOGLE_MONTHLY_LIMIT" });
+  }
+  const requestId = randomUUID();
+  const otherScope = randomUUID();
+  await budget.reserve(alice, requestId, 3, otherScope);
+  await expect(budget.reserve(alice, requestId, 3, otherScope)).rejects.toMatchObject({ code: "GOOGLE_REQUEST_ALREADY_USED" });
+  await expect(budget.reserve(alice, randomUUID(), 3, scope, new Date("2030-01-01T00:00:00Z"))).resolves.toBeUndefined();
+  for (const receipt of await db.collection("googleSearchRequests").find({}).toArray()) {
+    expect(Object.keys(receipt).sort()).toEqual(["_id", "createdAt", "userId", "workspaceId"].sort());
+  }
+});
+
+test("the 5000th allocated request is allowed but the 5001st cannot be reserved", async () => {
+  const scope = randomUUID();
+  const now = new Date();
+  const month = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit" }).format(now);
+  const id = createHash("sha256").update(`${scope}:${month}`).digest("hex");
+  await db.collection<{ _id: string; count: number }>("googleSearchBudgets").insertOne({ _id: id, count: 4999 });
+  const budget = new GoogleSearchBudget(client, db);
+  await budget.reserve(alice, randomUUID(), 5000, scope, now);
+  await expect(budget.reserve(bob, randomUUID(), 5000, scope, now)).rejects.toMatchObject({ code: "GOOGLE_MONTHLY_LIMIT" });
+  expect((await db.collection<{ _id: string; count: number }>("googleSearchBudgets").findOne({ _id: id }))?.count).toBe(5000);
+});
+
+test("collection endpoint resolves the saved search securely, calls Google once and persists no returned content", async () => {
+  vi.stubEnv("MONGODB_URI", server.getUri());
+  vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
+  vi.stubEnv("NEXTAUTH_URL", "http://localhost:3000");
+  vi.stubEnv("GOOGLE_COLLECTION_ENABLED", "true");
+  vi.stubEnv("GOOGLE_PLACES_API_KEY", "fixture-key");
+  vi.stubEnv("GOOGLE_PLACES_POLICY_ACKNOWLEDGED", "true");
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "2");
+  vi.stubEnv("GOOGLE_PLACES_BILLING_SCOPE", randomUUID());
+  vi.spyOn(auth, "currentActor").mockResolvedValue(alice);
+  const transport = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+    places: [{ id: "fixture-google-result", displayName: { text: "Synthetic response not retained" }, formattedAddress: "Address not retained" }]
+  }));
+  const saved = await store.load(alice);
+  const search = saved.state.searches[0];
+  const body = { searchId: search.id, requestId: randomUUID(), confirmed: true };
+  const request = (payload: unknown) => new Request("http://localhost:3000/api/v1/collection", {
+    method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify(payload)
+  });
+  const response = await collect(request(body));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ places: [{ name: "Synthetic response not retained" }] });
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(String(transport.mock.calls[0][1]?.body)).textQuery).toBe(`${search.term} em ${search.city}`);
+  expect(await store.load(alice)).toEqual(saved);
+  const repeated = await collect(request(body));
+  expect(repeated.status).toBe(409);
+  vi.spyOn(auth, "currentActor").mockResolvedValue(outsider);
+  expect((await collect(request({ ...body, requestId: randomUUID() }))).status).toBe(404);
+  expect(transport).toHaveBeenCalledTimes(1);
+  for (const name of ["googleSearchRequests", "googleSearchBudgets", "auditEvents", "portalWorkspaces"]) {
+    expect(JSON.stringify(await db.collection(name).find({}).toArray())).not.toContain("Synthetic response not retained");
+  }
 });

@@ -25,6 +25,7 @@ Portal de pesquisa de estabelecimentos por termo e municipio, com buscas salvas 
 | [Estrutura e padroes](docs/06-estrutura-e-padroes.md) | Clean Code, Arquitetura Limpa, SOLID, OO e responsabilidades |
 | [Deploy na Vercel](docs/07-deploy-vercel.md) | Variaveis, deploy, migracao Atlas, testes e operacao |
 | [Credenciais para a Vercel](docs/08-credenciais-vercel.md) | Criacao de Google OAuth, segredo de sessao e usuarios MongoDB Atlas |
+| [Google Places](docs/09-google-places.md) | Lista sob demanda, chave de servidor, franquia compartilhada e limites |
 
 ## Condicoes essenciais
 
@@ -62,9 +63,12 @@ use `npm.cmd run dev` e abra a URL informada pelo Next.js (normalmente
 <http://127.0.0.1:3000>). Use HTTP, nao abertura direta por `file://`.
 
 Esta entrega implementa autenticacao, API persistente, transacoes, auditoria,
-controle de concorrencia e verificacoes de processo/banco. A fonte real e os
-limites ainda nao foram definidos pelo responsavel: nao ha coleta, worker,
-catalogo territorial ou mapa cartografico. Criar busca nao descobre empresas.
+controle de concorrencia e verificacoes de processo/banco. Google Places esta
+integrado para consulta explicita em lista, sem armazenamento dos resultados,
+mapa pago, worker ou varredura municipal. Criar busca nao consulta o Google;
+e necessario confirmar a consulta separadamente. A integracao fica bloqueada
+ate configurar chave, politicas e parcela disponivel da franquia compartilhada.
+Veja [Google Places](docs/09-google-places.md).
 Os contratos normalizados e criterios de producao da especificacao continuam
 como alvo; veja o escopo efetivo em [Dados e API](docs/03-dados-e-api.md).
 

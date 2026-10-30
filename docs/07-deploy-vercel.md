@@ -8,9 +8,10 @@ Desenvolvimento e testes podem rodar localmente com Node.js.
 
 Dados persistem no Atlas, nao no filesystem das funcoes Vercel.
 O banco deve suportar transacoes/replica set. A aplicacao reutiliza o pool
-de conexoes por instancia. A coleta permanece bloqueada: fonte autorizada,
-retencao, limites, worker e mapa cartografico ainda nao foram definidos.
-O banco inicia vazio; salvar uma busca nao descobre estabelecimentos.
+de conexoes por instancia. Google Places permite consulta explicita em lista,
+sem persistir resultados. Chave, politicas e franquia alocada exigem configuracao
+conforme [Google Places](09-google-places.md). Worker, varredura territorial
+e mapa cartografico continuam pendentes. Salvar busca nao dispara consulta.
 
 ## 1. Criar credenciais
 
@@ -47,7 +48,9 @@ Variaveis modificadas exigem um novo deploy para entrar em vigor.
 A flag de coleta e validada somente em `POST /api/v1/collection`, apos
 autenticacao e verificacao de origem; nao bloqueia o build, login ou uso do
 portal. Ausente ou `false` retorna 409 `COLLECTION_DISABLED`; `true` retorna
-409 `COLLECTION_NOT_CONFIGURED` enquanto a integracao nao existir. Outro
+409 `COLLECTION_NOT_CONFIGURED` sem chave/revisao das politicas e
+`COLLECTION_BUDGET_REQUIRED` sem franquia alocada. Configuracao completa permite
+uma consulta sob demanda. Outro
 valor retorna 503 `COLLECTION_CONFIGURATION_INVALID`. Ativar a flag nao
 habilita uma fonte automaticamente nem inicia chamadas externas.
 
@@ -112,11 +115,12 @@ curl.exe --fail https://maps-ten-ruddy.vercel.app/api/ready
 Liveness esperada: `{"status":"ok"}`. Readiness esperada:
 
 ```json
-{"status":"ready","database":"ok","collection":"blocked"}
+{"status":"ready","database":"ok","collection":"COLLECTION_DISABLED"}
 ```
 
 Readiness verifica configuracao basica, ping Mongo e marcador de migracao,
-mas nao comprova que o Google aceitou Client ID/Secret. Teste login real,
+e informa `on_demand` quando a configuracao Google esta completa, sem chama-la.
+Isso nao comprova que o Google aceitou Client ID/Secret ou a chave Places. Teste login real,
 criacao de busca, recarga e logout. Configure dominio HTTPS, protecao de
 deploy, politicas e monitoramento adequados antes do uso publico.
 
@@ -172,5 +176,5 @@ dentro de uma requisicao ou promessa solta de funcao Vercel.
 - Falha de rede apos salvar: a escrita pode ter sido confirmada; recarregue
   antes de repetir uma acao nao idempotente.
 - Erro 429: limite de 300 mutacoes por minuto/usuario; aguarde o proximo minuto.
-- Sem resultados: nao ha fonte de estabelecimentos configurada. Nao e falha
-  do MongoDB e nao e resolvido criando uma chave OAuth.
+- Consulta bloqueada: revise configuracao Google Places, politicas e parcela
+  da franquia. Chave OAuth nao substitui a chave Places.

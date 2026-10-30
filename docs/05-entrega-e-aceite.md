@@ -7,10 +7,14 @@ incluindo Next.js App Router, React/TypeScript estrito, Clean Code,
 Arquitetura Limpa, SOLID e OO. Implementados: Next, login Google OAuth,
 persistencia MongoDB transacional, API de comandos, auditoria, concorrencia,
 migracao Atlas, configuracao Vercel e documentacao de credenciais.
-Nao concluidos: fonte autorizada, limites/retencao, catalogo/grade, coleta,
+Google Places integrado para consulta limitada em lista e memoria, com
+confirmacao, reserva mensal e sem mapa pago. Falta configurar chave, revisar
+politicas e alocar franquia compartilhada; nao houve consulta real de validacao.
+Nao concluidos: catalogo/grade, coleta municipal,
 worker, mapa cartografico e contratos normalizados/paginados.
 Essas lacunas impedem afirmar atendimento integral de RF/CA ou prontidao de
-producao. O responsavel ainda nao definiu fonte e limites; nao habilitar coleta.
+producao. Foi escolhido Google para consultas explicitas; a parcela disponivel
+da franquia compartilhada ainda precisa ser confirmada antes da ativacao.
 Operacao em [Deploy na Vercel](07-deploy-vercel.md).
 
 | Etapa | Entrega | Condicao para avancar |

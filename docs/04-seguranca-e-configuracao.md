@@ -35,6 +35,11 @@ Na implementacao, ignorar arquivos de ambiente locais no Git e versionar apenas 
 
 ## Politica de fonte e retencao
 
+A consulta Google explicita implementada usa resposta temporaria em memoria,
+sem persistir nomes, enderecos ou coordenadas. Politicas, configuracao de
+franquia compartilhada e limites estao em [Google Places](09-google-places.md).
+Nao habilita varredura territorial, exportacao ou base comercial permanente.
+
 Antes de habilitar Google, registrar aprovacao para o caso concreto: busca sistematica por cidade, armazenamento, constituicao de base, exibicao, periodos de cache e eventual exportacao. Revisar restricoes sobre scraping, prefetching, caching, criacao de conteudo/base a partir do Google e usos substitutivos dos servicos. O projeto nao presume que a grade territorial ou a base comercial sao permitidas pelo contrato padrao.
 
 | Tipo de dado | Tratamento proposto |

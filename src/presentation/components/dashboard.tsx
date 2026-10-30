@@ -2,6 +2,7 @@ import type { Visibility } from "../../domain/types";
 import type { Portal } from "../use-portal";
 import { EmptyState } from "./common";
 import { PlaceList } from "./place-list";
+import { GoogleSearchResults } from "./google-search-results";
 
 function Metric({ label, value, note, icon }: { label: string; value: number; note: string; icon: string }) {
   return <article className="metric-card"><div className="metric-top"><span>{label}</span><span className="metric-icon" aria-hidden="true">{icon}</span></div>
@@ -32,8 +33,9 @@ export function Dashboard({ portal, onNewSearch, onSelect, selectedId }: {
         </div>)}
       <button className="search-tab-new" onClick={onNewSearch}>＋ Abrir busca</button>
     </div>
-    <div className="search-summary"><div className="search-title-wrap"><h2 className="search-title">{search.term}</h2><p className="search-meta">{search.city} · {search.demo ? "Dados demonstrativos" : "Sem coleta"}</p></div>
-      <span className="search-state"><span className="status-dot" />Sem coleta externa</span></div>
+    <div className="search-summary"><div className="search-title-wrap"><h2 className="search-title">{search.term}</h2><p className="search-meta">{search.city} · {search.demo ? "Dados demonstrativos" : "Consulta sob demanda"}</p></div>
+      <span className="search-state"><span className="status-dot" />{portal.remote ? "Google Places sob demanda" : "Sem coleta externa"}</span></div>
+    {portal.remote && !search.demo ? <GoogleSearchResults key={search.id} search={search} /> : <>
     <div className="metric-grid">
       <Metric label="Resultados nesta busca" value={count} note={search.demo ? "registros demonstrativos" : "registros no workspace"} icon="⌕" />
       <Metric label="Visíveis" value={count - hidden} note="disponíveis na lista" icon="◉" />
@@ -78,6 +80,7 @@ export function Dashboard({ portal, onNewSearch, onSelect, selectedId }: {
       </section>
     </div>
     {ids.length > located.length && <p className="footer-note">{ids.length - located.length} resultado(s) sem coordenadas demonstrativas não aparecem no mapa.</p>}
+    </>}
   </>;
 }
 

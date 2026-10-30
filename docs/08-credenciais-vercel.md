@@ -20,7 +20,8 @@ os valores diretamente na Vercel ou no ambiente privado indicado.
 
 O Google OAuth autentica usuarios. Nao fornece estabelecimentos nem habilita
 Places ou Maps. Nenhuma chave Places/Maps, token pessoal GitHub ou token Vercel
-e necessario para o funcionamento atual da aplicacao.
+e necessario para login e persistencia. A consulta opcional de estabelecimentos
+exige chave Places separada, conforme [Google Places](09-google-places.md).
 
 ## 2. Google OAuth: Client ID e Client Secret
 

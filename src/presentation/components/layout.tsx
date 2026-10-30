@@ -37,7 +37,7 @@ export function Layout({ portal, children }: { portal: Portal; children: ReactNo
     </aside>
     <main className="main-content">
       <header className="topbar"><div className="breadcrumb"><span>Workspace</span><span className="breadcrumb-separator">/</span><strong>{pageLabels[state.page]}</strong></div>
-        <div className="topbar-actions"><span className="demo-pill"><span className="status-dot" />{portal.remote ? "COLETA NÃO CONFIGURADA" : "MODO DEMONSTRATIVO"}</span>
+        <div className="topbar-actions"><span className="demo-pill"><span className="status-dot" />{portal.remote ? "CONSULTAS SOB DEMANDA" : "MODO DEMONSTRATIVO"}</span>
           <button className="icon-button help-button" aria-label="Sobre o portal" title="Sobre o portal" onClick={() => navigate("settings")}>?</button>
         </div>
       </header>

@@ -20,6 +20,7 @@ export function LoginClient({ hasError }: { hasError: boolean }) {
         setPending(false);
       }
     }}>{pending ? "Redirecionando..." : "Entrar com Google"}</button>
-    <p className="footer-note">A coleta de estabelecimentos permanece bloqueada até a configuração de uma fonte autorizada.</p>
+    <p className="footer-note">Consultas Google opcionais exigem configuração, limite e confirmação explícita.</p>
+    <p><a href="/terms">Termos de uso</a>{" · "}<a href="/privacy">Privacidade</a></p>
   </main>;
 }

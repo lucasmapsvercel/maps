@@ -15,6 +15,13 @@ e agregado por workspace, nao o modelo normalizado de coleta abaixo.
 Fonte, limites, mapa cartografico e worker externo continuam pendentes. Consulte
 [Deploy na Vercel](07-deploy-vercel.md).
 
+Para a primeira integracao, foi escolhido Google Places Text Search sob
+demanda, em lista e sem mapa pago. Nao executa o plano territorial descrito
+abaixo e nao persiste conteudo de provedor. Chave, revisao de politicas e
+parcela da franquia compartilhada exigem configuracao explicita.
+Veja [Google Places](09-google-places.md). As secoes de grade/worker a seguir
+continuam sendo um alvo separado, condicionado a autorizacao especifica.
+
 Stack do portal implementada: Next.js, React e TypeScript, com App Router
 para paginas TSX e endpoints de servidor. Casos de uso nao dependem do framework.
 Na Vercel, as rotas web executam no runtime da plataforma; coleta longa nao

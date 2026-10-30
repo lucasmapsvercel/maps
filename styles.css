@@ -275,3 +275,9 @@ button:disabled {
   cursor: wait;
   opacity: 0.6;
 }
+.google-attribution {
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  color: #5f6368;
+  margin: 12px 0;
+}

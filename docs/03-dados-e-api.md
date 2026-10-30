@@ -10,7 +10,7 @@ coleta real, ainda nao implementado. A interface atual funciona com:
 | `GET/POST /api/auth/*` | NextAuth, Google OAuth, cookies de sessao e CSRF |
 | `GET /api/v1/portal` | Snapshot Mongo do workspace e view do usuario, com versao |
 | `POST /api/v1/portal` | `{ version, commandId, command }`, sem estado/autor/workspace do cliente |
-| `POST /api/v1/collection` | Valida coleta em runtime: 409 desativada/nao implementada; 503 configuracao invalida |
+| `POST /api/v1/collection` | Consulta Google explicita, uma pagina temporaria; valida flag, chave, politicas e reserva mensal |
 | `GET /api/health` | Liveness sem banco |
 | `GET /api/ready` | Configuracao, ping Mongo e marcador de migracao |
 
@@ -34,6 +34,8 @@ auditoria e recibo. Conflitos retornam 409 sem sobrescrever dados. Repetir
 UUID/conteudo devolve estado atual sem repetir a alteracao; UUID com outro
 conteudo retorna 409. Corpos acima de 8 KiB sao rejeitados.
 Nao estao implementados paginacao, geoconsultas ou coleta dos contratos abaixo.
+Consulta Google e contadores separados nao gravam conteudo de provedor no agregado.
+Contrato e limites em [Google Places](09-google-places.md).
 Procedimentos em [Deploy na Vercel](07-deploy-vercel.md).
 
 ## Convencoes

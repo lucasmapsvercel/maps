@@ -5,7 +5,7 @@ import { PlaceList } from "./place-list";
 export function SavedSearches({ portal }: { portal: Portal }) {
   return <div className="saved-list">{portal.state.searches.length ? portal.state.searches.map((search) =>
     <article className="saved-item" key={search.id}><span className="saved-symbol" aria-hidden="true">⌕</span>
-      <span className="saved-copy"><strong>{search.term}</strong><small>{search.city} · {search.placeIds.length} resultados {search.demo ? "demonstrativos" : "· sem coleta"}</small></span>
+      <span className="saved-copy"><strong>{search.term}</strong><small>{search.city} · {search.demo ? `${search.placeIds.length} resultados demonstrativos` : "resultados Google não armazenados"}</small></span>
       <button className="button button-quiet button-small" onClick={() => portal.mutate({ type: "openSearch", id: search.id })}>Abrir busca →</button>
     </article>) : <EmptyState title="Ainda não há buscas salvas">Crie sua primeira pesquisa.</EmptyState>}</div>;
 }
@@ -24,8 +24,8 @@ export function Settings({ remote = false }: { remote?: boolean }) {
     <p>{remote ? "Portal autenticado com Google OAuth. Dados compartilhados no MongoDB; abas e filtros separados por usuário." : "Demonstração isolada para testes locais, com dados sintéticos."}</p>
     <div className="settings-grid">
       {[
-        ["Coleta de estabelecimentos", "Defina fonte autorizada, retenção e limites antes da integração. Não há worker de coleta real configurado.", "Bloqueada"],
-        ["Mapa", "Visualização ilustrativa, sem Google Maps nem coordenadas reais.", "Integração não configurada"],
+        ["Consulta de estabelecimentos", "Google Places sob demanda: uma chamada, até 20 resultados temporários. Exige chave, revisão das políticas e limite da franquia disponível.", "Configuração obrigatória"],
+        ["Mapa", "A primeira integração Google exibe somente lista com atribuição, sem carregamento de mapa pago.", "Não habilitado"],
         ["Dados e armazenamento", remote ? "Buscas, comentários, favoritos e ajustes persistem no MongoDB. O navegador não é a fonte dos dados." : "Dados sintéticos neste navegador.", remote ? "MongoDB" : "Armazenamento local"],
         ["Acesso e segurança", remote ? "Google OAuth, e-mails verificados e lista de acesso definida pelo administrador." : "Somente demonstração.", remote ? "Autenticado" : "Teste isolado"]
       ].map(([title, description, status]) => <article className="setting-card" key={title}><h3>{title}</h3><p>{description}</p><span className="setting-status"><span className="status-dot" />{status}</span></article>)}
