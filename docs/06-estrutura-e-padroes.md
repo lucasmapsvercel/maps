@@ -79,11 +79,17 @@ malha municipal licenciada, politica de retencao e orcamento para coleta
 municipal. A integracao Google atual persiste resultados e detalhes
 sanitizados de logs; veja [Google Places](09-google-places.md).
 
-O runner atual inicia uma promessa em segundo plano no processo do servidor;
-nao e um worker duravel. Encerrar a instancia pode interromper jobs e manter
-o bloqueio do cursor. Antes de depender de coletas longas na Vercel, separar
-a execucao em fila duravel com leases e checkpoints. Persistir o cursor nao
-resolve sozinho a interrupcao de processos; essa limitacao permanece aberta.
+O runner agenda Vercel Workflow e aguarda a confirmacao de agendamento antes
+de responder. O workflow recebe somente o ID do job; etapas carregam
+credenciais e dados no servidor. A orquestracao sobrepoe importacao e proxima
+pagina, aguardando ambas antes de finalizar inclusive em erro.
+Checkpoints Mongo protegem reentregas: pagina salva nao consulta novamente
+o Google; importacao, recibo, contador e remocao do buffer usam a mesma
+transacao. Uma reserva sem checkpoint de pagina bloqueia a continuacao,
+pois a API externa nao permite garantir exatamente uma chamada apos uma queda.
+Falhas tecnicas usam retries do Workflow; erros comerciais/provedor sao fatais.
+Jobs legados interrompidos sao recuperados conservadoramente pelo historico,
+sem repetir chamadas, apagar resultados ou estornar consumo.
 
 ## SOLID, leitura e verificacao
 

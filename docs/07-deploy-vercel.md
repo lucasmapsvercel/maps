@@ -8,10 +8,11 @@ Desenvolvimento e testes podem rodar localmente com Node.js.
 
 Dados persistem no Atlas, nao no filesystem das funcoes Vercel.
 O banco deve suportar transacoes/replica set. A aplicacao reutiliza o pool
-de conexoes por instancia. Google Places permite consulta explicita em lista,
-sem persistir resultados. Chave, politicas e franquia alocada exigem configuracao
-conforme [Google Places](09-google-places.md). Worker, varredura territorial
-e mapa cartografico continuam pendentes. Salvar busca nao dispara consulta.
+de conexoes por instancia. Google Places permite consulta explicita temporaria
+ou coleta paginada com importacao no MongoDB. Chave, politicas e franquia
+alocada exigem configuracao conforme [Google Places](09-google-places.md).
+Vercel Workflow executa a coleta duravel. Varredura territorial continua
+pendente. Salvar busca nao dispara consulta.
 
 ## 1. Criar credenciais
 
@@ -45,8 +46,34 @@ que apontem para arquivos de segredos. Configure Preview separadamente, com
 credenciais e banco de teste, nunca os dados de producao.
 Variaveis modificadas exigem um novo deploy para entrar em vigor.
 
-A flag de coleta e validada somente em `POST /api/v1/collection`, apos
-autenticacao e verificacao de origem; nao bloqueia o build, login ou uso do
+### Execucao duravel com Vercel Workflow
+
+A dependencia `workflow` e o wrapper `withWorkflow` no Next geram as rotas
+internas do runtime no build. Na Vercel:
+
+1. Em **Settings > Environment Variables**, habilite
+   **Enable access to System Environment Variables**.
+2. Publique um novo deploy, inclusive apos alterar essa opcao.
+3. Confirme acesso a `VERCEL_DEPLOYMENT_ID` no runtime: o SDK seleciona
+   automaticamente o World gerenciado da Vercel. Nao defina
+   `WORKFLOW_TARGET_WORLD=local` em Production/Preview nem use filesystem
+   efemero para a fila. Forcar `vercel` sem o ID nao corrige a configuracao.
+4. Acompanhe as execucoes/etapas no painel de observabilidade Workflow
+   da Vercel e os logs de funcoes. A confirmacao do POST nao significa
+   que todas as etapas terminaram; o portal consulta o progresso no MongoDB.
+
+Fila e journal duraveis sao gerenciados pela plataforma e possuem limites
+e cobranca proprios, separados da cota Google. Revise plano, precos e limites
+de execucao/eventos antes de producao. Somente jobId, indices, decisoes de
+controle e erros entram no journal; chave Google, tokens de paginacao e
+estabelecimentos nao sao argumentos/resultados das etapas.
+
+Documentacao oficial: [Next.js](https://workflow-sdk.dev/docs/getting-started/next)
+e [World Vercel](https://workflow-sdk.dev/worlds/vercel).
+
+A flag de coleta e validada em `POST /api/v1/collection` e
+`POST /api/v1/collection/run`, apos autenticacao e verificacao de origem,
+e novamente antes de cada pagina duravel; nao bloqueia o build, login ou uso do
 portal. Ausente ou `false` retorna 409 `COLLECTION_DISABLED`; `true` retorna
 409 `COLLECTION_NOT_CONFIGURED` sem chave/revisao das politicas e
 `COLLECTION_BUDGET_REQUIRED` sem franquia alocada. Configuracao completa permite
@@ -145,6 +172,9 @@ npm.cmd run build
 ```
 
 `npm start` pode conferir o build local, mas nao e o comando de deploy Vercel.
+O Workflow local usa `.workflow-data/`, ignorado pelo Git, sem exigir conta
+Vercel. Nao compartilhe esse diretorio com workers/processos concorrentes.
+O backend local e para desenvolvimento, nao substitui a fila gerenciada.
 `npm test` usa MongoDB temporario com replica set e pode baixar o binario
 oficial no primeiro uso; nao utiliza o Atlas. `npm run test:integration`
 executa somente a integracao.
@@ -161,9 +191,21 @@ backup dos dados. Teste restauracao em cluster isolado antes de depender dela.
 Uma restauracao deve respeitar exclusoes legais e retencao de dados.
 Nao ha backup ou restauracao automatica implementados pelo portal.
 
-Worker de coleta continua pendente. Se implementado, exige execucao duravel
-apropriada e armazenamento de fila/checkpoints; nao executar tarefas longas
-dentro de uma requisicao ou promessa solta de funcao Vercel.
+Coletas novas usam Workflow com reentrega de etapas e checkpoints
+transacionais. Nao dependem de promessa solta apos o retorno HTTP.
+Falha de agendamento e explicita e libera o cursor se o job nao iniciou.
+Se uma etapa reentregue encontra chamada Google reservada sem pagina salva,
+nao a reenvia: seu consumo e mantido e o cursor fica bloqueado.
+
+Ao consultar o historico/progresso, jobs sem atividade ha pelo menos
+15 minutos sao verificados. Com runId duravel, somente runs terminais
+(failed/cancelled/completed) permitem recuperar um job ainda ativo no Mongo;
+runs ativos nao sao encerrados pela idade. Jobs legados sem runId podem ser
+marcados como interrompidos apos essa janela. A recuperacao preserva buffer,
+logs e consumo, libera activeJobId e bloqueia continuacao incerta.
+Resultados do buffer podem ser importados em nova execucao sem Google;
+para consultar novamente apos um cursor incerto, crie outra busca.
+Nao ha reinicio automatico de jobs legados nem estorno de chamadas.
 
 ## Diagnostico
 

@@ -57,7 +57,10 @@ export class MongoPortalStore {
     return snapshot(workspace, view?.data);
   }
 
-  async execute(actor: Actor, command: PortalCommand, version: number, commandId: string = randomUUID()): Promise<PortalSnapshot> {
+  async execute(
+    actor: Actor, command: PortalCommand, version: number, commandId: string = randomUUID(),
+    collectionPage?: { jobId: string; importIndex: number; pageIds: string[] }
+  ): Promise<PortalSnapshot> {
     const session = this.client.startSession();
     try {
       const result = await session.withTransaction(async () => {
@@ -72,6 +75,22 @@ export class MongoPortalStore {
         if (receipt) {
           if (receipt.fingerprint !== fingerprint) throw new PortalError(409, "IDEMPOTENCY_CONFLICT", "Identificador de operação já usado com outro conteúdo.");
           return snapshot(workspace, view?.data);
+        }
+        if (collectionPage) {
+          if (command.type !== "importPlaces") throw new Error("Checkpoint permitido somente para importação.");
+          const cursor = await this.db.collection<{ activeJobId: string; workspaceId: string; searchId: string; buffer: Array<{ id: string }> }>("collectionCursors")
+            .findOne({ activeJobId: collectionPage.jobId, workspaceId: actor.workspaceId, searchId: command.searchId }, { session });
+          if (!cursor || JSON.stringify(cursor.buffer.slice(0, collectionPage.pageIds.length).map((item) => item.id)) !== JSON.stringify(collectionPage.pageIds)) {
+            throw new PortalError(409, "COLLECTION_CHECKPOINT_CONFLICT", "A página pendente de importação mudou.");
+          }
+          const checkpoint = await this.db.collection<{ _id: string; workspaceId: string; status: string; importedPages: number; collectedSoFar: number }>("collectionJobs")
+            .updateOne({
+              _id: collectionPage.jobId, workspaceId: actor.workspaceId, status: "running", importedPages: collectionPage.importIndex
+            }, { $inc: { importedPages: 1, collectedSoFar: command.places.length }, $set: { updatedAt: new Date() } }, { session });
+          if (checkpoint.modifiedCount !== 1) throw new PortalError(409, "COLLECTION_CHECKPOINT_CONFLICT", "O checkpoint da coleta mudou.");
+          await this.db.collection("collectionCursors").updateOne({ activeJobId: collectionPage.jobId }, [{
+            $set: { buffer: { $slice: ["$buffer", collectionPage.pageIds.length, { $add: [{ $size: "$buffer" }, 1] }] } }
+          }], { session });
         }
         const viewCommand = isViewCommand(command);
         if (!viewCommand && workspace.version !== version) {

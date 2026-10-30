@@ -12,3 +12,5 @@ next-env.d.ts
 *.log
 .secrets/
 .backups/
+/.swc
+.workflow-data/

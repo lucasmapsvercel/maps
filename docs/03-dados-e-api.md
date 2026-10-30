@@ -26,6 +26,17 @@ execucao), alem de `requestsMade`, limite, status e resumo final. Jobs antigos
 sem esse contador continuam compativeis. O painel atualiza os resultados
 durante a execucao quando o contador aumenta, sem disparar chamadas Google.
 
+Jobs novos usam Vercel Workflow e armazenam internamente `workflowVersion`,
+`workflowRunId`, `billingScope`, `importedPages` e `updatedAt`, sem expor esses
+campos nos endpoints de progresso. `collectionCursors.lastRequestId` confirma
+a ultima pagina salva; `blocked` impede repetir chamadas de resultado incerto.
+Importacao e checkpoint (contador/prefixo do buffer) usam a mesma transacao
+do agregado. GET de historico/progresso pode reparar metadados de jobs
+interrompidos ha pelo menos 15 minutos, sem consultar o Google nem alterar
+os dados recebidos: verifica o estado do run quando conhecido, preserva runs
+ativos e encerra jobs legados/terminais com erro, bloqueando cursores incertos.
+Veja [durabilidade da coleta](09-google-places.md#durabilidade-e-chamadas-interrompidas).
+
 Comandos: `addSearch`, `deleteSearch`, `openSearch`, `closeTab`, `navigate`, `setFilter`,
 `toggleFavorite`, `toggleHidden`, `addComment`, `editPlace`, `clearOverrides`.
 Schemas estritos em `src/domain/portal-command.ts`. Comando recebe somente

@@ -48,7 +48,7 @@ export class GoogleSearchBudget {
             .updateOne({
               _id: collectionJobId, workspaceId: actor.workspaceId, status: "running",
               $expr: { $lt: ["$requestsMade", "$maxRequestsPerRun"] }
-            }, { $inc: { requestsMade: 1 } }, { session });
+            }, { $inc: { requestsMade: 1 }, $set: { updatedAt: now } }, { session });
           if (job.modifiedCount !== 1) {
             throw new PortalError(409, "COLLECTION_REQUEST_LIMIT", "O limite de requisições desta execução foi atingido ou a coleta não está em andamento. Nenhuma chamada foi realizada.");
           }

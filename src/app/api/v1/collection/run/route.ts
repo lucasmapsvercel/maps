@@ -7,6 +7,7 @@ import { validateCollectionRequest } from "../../../../../infrastructure/server/
 import { consumeMutationLimit } from "../../../../../infrastructure/server/rate-limit";
 import { secret } from "../../../../../infrastructure/server/config";
 import { startCollectionJob, listCollectionJobs, serializeCollectionJob } from "../../../../../infrastructure/server/collection-runner";
+import { recoverInterruptedCollection } from "../../../../../infrastructure/server/collection-recovery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,6 +44,8 @@ export function GET(request: Request) {
     if (!searchId) throw new PortalError(400, "MISSING_PARAM", "Parâmetro searchId obrigatório.");
     const db = await mongoDatabase();
     const jobs = await listCollectionJobs(searchId, actor.workspaceId, db);
-    return json(jobs.map(serializeCollectionJob));
+    const client = await mongoClient();
+    const reconciled = await Promise.all(jobs.map((job) => recoverInterruptedCollection(job, client, db)));
+    return json(reconciled.map(serializeCollectionJob));
   });
 }

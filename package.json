@@ -24,7 +24,14 @@
     "next-auth": "^4.24.15",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "workflow": "^5.2.3",
     "zod": "^4.3.6"
+  },
+  "overrides": {
+    "workflow": {
+      "undici": "^7.30.1",
+      "zod": "$zod"
+    }
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

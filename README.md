@@ -67,7 +67,10 @@ controle de concorrencia e verificacoes de processo/banco. O painel Google
 importa paginas de ate 20 resultados e persiste o cursor para continuar na
 proxima execucao. Configuracoes define o limite de requisicoes por execucao
 e exibe logs com request/response sanitizados, retidos por 30 dias.
-Nao ha mapa Google pago, varredura municipal nem worker duravel.
+A coleta usa Vercel Workflow para executar etapas duraveis, com checkpoints
+transacionais no MongoDB. Reentregas nao repetem paginas ja salvas nem
+importacoes confirmadas; chamadas com resposta incerta nao sao reenviadas.
+Nao ha mapa Google pago nem varredura municipal.
 Criar busca nao consulta o Google; e necessario confirmar a coleta.
 A integracao fica bloqueada
 ate configurar chave, politicas e parcela disponivel da franquia compartilhada.
@@ -99,7 +102,9 @@ veja os detalhes de cache e resposta em [Dados e API](docs/03-dados-e-api.md).
 O deploy suportado e exclusivamente na **Vercel**. Importe o repositorio como
 projeto **Next.js**, mantenha build e saida nos padroes do framework e use
 Node.js 24.x. Nao configure exportacao estatica. O passo a passo, as variaveis
-e a separacao do futuro worker estao no [guia Vercel](docs/07-deploy-vercel.md).
+e a ativacao do Workflow estao no [guia Vercel](docs/07-deploy-vercel.md).
+Habilite **Enable access to System Environment Variables** e faca novo deploy
+para usar o backend gerenciado, sem armazenamento local de fila na Vercel.
 
 Na Vercel, configure MongoDB externo com replica set, segredos OAuth e callback
 HTTPS. Use somente variaveis diretas de servidor no painel da plataforma.

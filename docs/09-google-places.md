@@ -30,7 +30,9 @@ Cada nova execucao tem seu proprio limite e continua da pagina anterior.
 A documentacao oficial consultada em 2026-10-30 define `pageSize` maximo de
 **20 resultados por requisicao**. O portal sempre solicita 20, inclusive nas
 paginas seguintes. Configurar 100 nao significa garantir 2000 resultados:
-o Google pode retornar menos itens ou encerrar a paginacao antes. Nao ha
+Text Search (New) limita a mesma consulta a **60 resultados somando todas
+as paginas**, normalmente tres chamadas de 20. O Google pode retornar menos
+itens ou encerrar a paginacao antes. Nao ha
 varredura territorial nem consultas alternativas para contornar esse fim.
 
 Exemplo: com limite 100 e cota mensal do sistema de 5000, uma execucao que
@@ -92,6 +94,36 @@ transacao antes de cada chamada. O limite por execucao nunca e ultrapassado;
 ao atingi-lo, o job conclui com `hasMore: true` se ainda houver continuacao.
 A cota mensal menor que o limite por execucao interrompe novas chamadas com
 erro explicito, sem perder as paginas ja importadas nem o cursor.
+
+### Durabilidade e chamadas interrompidas
+
+O POST agenda Vercel Workflow, em vez de manter uma promessa solta na funcao
+HTTP. O workflow recebe apenas jobId e executa preparacao, planejamento,
+consulta, importacao e finalizacao em etapas persistidas.
+Chaves sao lidas apenas no servidor; tokens e resultados ficam no MongoDB,
+nao no journal do workflow. Configuracao/flag e validada a cada nova pagina.
+
+Uma etapa tecnica pode ser reentregue (tres retries por padrao do SDK).
+O ID deterministico da chamada e o checkpoint do cursor impedem reenviar
+uma pagina ja persistida. Importacao, recibo, contagem e remocao do buffer
+sao confirmados na mesma transacao, evitando duplicacao apos perda do
+acknowledgement. Erros Google/comerciais encerram a execucao sem retry.
+
+Nao e possivel garantir exatamente uma chamada entre o Google e o MongoDB
+em caso de queda: se uma etapa reentregue encontra reserva/recibo, mas nao
+checkpoint da pagina, a continuacao e bloqueada com `COLLECTION_RESPONSE_UNCERTAIN`, sem repetir
+a chamada nem estornar consumo. O buffer confirmado permanece recuperavel.
+Uma nova busca e necessaria para voltar a consultar apos essa incerteza.
+Uma falha explicita do provedor que encerrou normalmente o job preserva o
+comportamento anterior: o usuario pode confirmar outra execucao usando o
+mesmo token, sem voltar a primeira pagina; a nova tentativa consome cota.
+
+Leituras autenticadas do historico/progresso recuperam jobs interrompidos
+sem atividade ha pelo menos 15 minutos. Runs duraveis ainda ativos sao
+preservados; runs terminais ou jobs legados sem runId sao encerrados com
+erro explicito e liberacao do bloqueio ativo. O cursor permanece bloqueado
+para chamadas externas incertas, sem apagar resultados, buffer ou logs.
+Ativacao e operacao: [Deploy na Vercel](07-deploy-vercel.md).
 
 ## Franquia gratuita nao significa garantia de custo zero
 
