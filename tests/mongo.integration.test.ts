@@ -15,6 +15,11 @@ import { GET, POST } from "../src/app/api/v1/portal/route";
 import { POST as collect } from "../src/app/api/v1/collection/route";
 import { mongoClient } from "../src/infrastructure/server/mongo";
 import { GoogleSearchBudget } from "../src/infrastructure/server/google-search-budget";
+import { LoggedGoogleSearch } from "../src/infrastructure/server/logged-google-search";
+import { PortalError } from "../src/application/portal-error";
+import { GET as getLogs } from "../src/app/api/v1/collection/logs/route";
+import { startCollectionJob, getCollectionJob, getQuotaUsage } from "../src/infrastructure/server/collection-runner";
+import { GET as getCollectionConfig, PUT as putCollectionConfig } from "../src/app/api/v1/collection/config/route";
 
 let server: MongoMemoryReplSet;
 let client: MongoClient;
@@ -43,6 +48,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
+
+async function setRequestLimit(maxRequestsPerRun: number) {
+  await db.collection<{ _id: string; maxRequestsPerRun: number }>("collectionConfig")
+    .updateOne({ _id: "global" }, { $set: { maxRequestsPerRun } }, { upsert: true });
+}
 
 test("migrations are repeatable and records survive reopening the repository", async () => {
   await migratePortal(db);
@@ -163,7 +173,7 @@ test("Google monthly reservations enforce exact limit across workspaces concurre
   const otherScope = randomUUID();
   await budget.reserve(alice, requestId, 3, otherScope);
   await expect(budget.reserve(alice, requestId, 3, otherScope)).rejects.toMatchObject({ code: "GOOGLE_REQUEST_ALREADY_USED" });
-  await expect(budget.reserve(alice, randomUUID(), 3, scope, new Date("2030-01-01T00:00:00Z"))).resolves.toBeUndefined();
+  await expect(budget.reserve(alice, randomUUID(), 3, scope, new Date("2030-01-01T00:00:00Z"))).resolves.toEqual(expect.any(String));
   for (const receipt of await db.collection("googleSearchRequests").find({}).toArray()) {
     expect(Object.keys(receipt).sort()).toEqual(["_id", "createdAt", "userId", "workspaceId"].sort());
   }
@@ -204,6 +214,11 @@ test("collection endpoint resolves the saved search securely, calls Google once 
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ places: [{ name: "Synthetic response not retained" }] });
   expect(transport).toHaveBeenCalledTimes(1);
+  const receipt = await db.collection("googleSearchRequests").findOne({ searchId: search.id, source: "direct" });
+  expect(receipt).toMatchObject({
+    actorName: alice.name, term: search.term, city: search.city,
+    status: "success", resultCount: 1, durationMs: expect.any(Number)
+  });
   expect(JSON.parse(String(transport.mock.calls[0][1]?.body)).textQuery).toBe(`${search.term} em ${search.city}`);
   expect(await store.load(alice)).toEqual(saved);
   const repeated = await collect(request(body));
@@ -214,4 +229,280 @@ test("collection endpoint resolves the saved search securely, calls Google once 
   for (const name of ["googleSearchRequests", "googleSearchBudgets", "auditEvents", "portalWorkspaces"]) {
     expect(JSON.stringify(await db.collection(name).find({}).toArray())).not.toContain("Synthetic response not retained");
   }
+});
+
+test("Google logs are reserved before transport, retain sanitized failures and reject duplicate or over-budget calls", async () => {
+  const actor = { ...alice, workspaceId: "logs-failures" };
+  const request = {
+    requestId: randomUUID(), billingScope: randomUUID(), limit: 1,
+    searchId: "log-search", term: "Teste", city: "Belém", source: "direct" as const
+  };
+  const provider = { search: vi.fn(async () => {
+    expect(await db.collection("googleSearchRequests").findOne({ workspaceId: actor.workspaceId }))
+      .toMatchObject({ status: "pending", term: "Teste" });
+    throw new PortalError(502, "GOOGLE_CONNECTION_FAILED", "Private response fixture-secret");
+  }) };
+  const logged = new LoggedGoogleSearch(client, db, provider);
+  await expect(logged.search(actor, request)).rejects.toMatchObject({ code: "GOOGLE_CONNECTION_FAILED" });
+  const receipts = await db.collection("googleSearchRequests").find({ workspaceId: actor.workspaceId }).toArray();
+  expect(receipts).toHaveLength(1);
+  expect(receipts[0]).toMatchObject({ status: "failed", errorCode: "GOOGLE_CONNECTION_FAILED", durationMs: expect.any(Number) });
+  expect(JSON.stringify(receipts)).not.toContain("fixture-secret");
+  expect(receipts[0]).not.toHaveProperty("resultCount");
+  await expect(logged.search(actor, request)).rejects.toMatchObject({ code: "GOOGLE_REQUEST_ALREADY_USED" });
+  await expect(logged.search(actor, { ...request, requestId: randomUUID() })).rejects.toMatchObject({ code: "GOOGLE_MONTHLY_LIMIT" });
+  expect(provider.search).toHaveBeenCalledTimes(1);
+  expect(await db.collection("googleSearchRequests").countDocuments({ workspaceId: actor.workspaceId })).toBe(1);
+});
+
+test("logs endpoint requires login, isolates workspaces, omits legacy receipts and returns only the latest 100 without secrets", async () => {
+  vi.stubEnv("MONGODB_URI", server.getUri());
+  vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
+  vi.stubEnv("GOOGLE_COLLECTION_ENABLED", "false");
+  const actor = { ...alice, workspaceId: "logs-history" };
+  const other = { ...alice, workspaceId: "logs-other" };
+  const budget = new GoogleSearchBudget(client, db);
+  await budget.reserve(actor, randomUUID(), 1, randomUUID());
+  const metadata = {
+    actorName: actor.name, searchId: "search-log", term: "Teste", city: "Belém",
+    source: "direct" as const, continuation: false
+  };
+  for (let index = 0; index < 101; index++) {
+    await budget.reserve(actor, randomUUID(), 101, "logs-history-scope",
+      new Date(Date.UTC(2026, 9, 1, 0, index)), { ...metadata, term: `Consulta ${index}` });
+  }
+  await budget.reserve(other, randomUUID(), 1, randomUUID(), new Date(), { ...metadata, term: "Outro workspace" });
+  const current = vi.spyOn(auth, "currentActor").mockResolvedValue(null);
+  const request = () => new Request("http://localhost:3000/api/v1/collection/logs");
+  expect((await getLogs(request())).status).toBe(401);
+  current.mockResolvedValue(actor);
+  const response = await getLogs(request());
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const body = await response.json();
+  expect(body.logs).toHaveLength(100);
+  expect(body.logs[0].term).toBe("Consulta 100");
+  expect(body.logs[99].term).toBe("Consulta 1");
+  expect(body.logs[0]).not.toHaveProperty("userId");
+  expect(body.logs[0]).not.toHaveProperty("workspaceId");
+  expect(JSON.stringify(body)).not.toContain("Outro workspace");
+});
+
+test("background collection records each Google page, without storing tokens or returned places in logs", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "5");
+  const actor = { ...alice, workspaceId: "logs-job" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Coleta teste", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  const transport = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({
+      places: [{ id: "job-place", displayName: { text: "Synthetic company" } }], nextPageToken: "private-page-token"
+    }))
+    .mockResolvedValueOnce(Response.json({ places: [] }));
+  const id = await startCollectionJob(actor, search.id, search.term, search.city, "fixture-api-key", randomUUID(), client, db);
+  await vi.waitFor(async () => expect((await getCollectionJob(id, actor.workspaceId, db))?.status).toBe("done"), { timeout: 10000 });
+  expect(transport).toHaveBeenCalledTimes(2);
+  const logs = await db.collection("googleSearchRequests").find({ workspaceId: actor.workspaceId }).sort({ createdAt: 1 }).toArray();
+  expect(logs).toHaveLength(2);
+  expect(logs[0]).toMatchObject({ source: "collection", status: "success", resultCount: 1, continuation: false });
+  expect(logs[1]).toMatchObject({ source: "collection", status: "success", resultCount: 0, continuation: true });
+  for (const privateValue of ["private-page-token", "fixture-api-key", "Synthetic company", "job-place"]) {
+    expect(JSON.stringify(logs)).not.toContain(privateValue);
+  }
+});
+
+async function waitForJob(id: string, workspaceId: string) {
+  await vi.waitFor(async () => {
+    const job = await getCollectionJob(id, workspaceId, db);
+    expect(["done", "failed"]).toContain(job?.status);
+    expect(await db.collection("collectionCursors").countDocuments({ activeJobId: id })).toBe(0);
+  }, { timeout: 10000 });
+  return (await getCollectionJob(id, workspaceId, db))!;
+}
+
+test("each execution allows one maximum-size page and continues at the next page, consuming only actual monthly requests", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+  await setRequestLimit(1);
+  const actor = { ...alice, workspaceId: "incremental-requests" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Lotes", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  const page = (start: number, count: number, nextPageToken?: string) => Response.json({
+    places: Array.from({ length: count }, (_, index) => ({ id: `place-${start + index}` })), nextPageToken
+  });
+  const transport = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(page(0, 20, "next-20"))
+    .mockResolvedValueOnce(page(20, 20, "next-40"))
+    .mockResolvedValueOnce(page(40, 15));
+  const scope = randomUUID();
+  for (const [index, count] of [20, 20, 15].entries()) {
+    const id = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+    const job = await waitForJob(id, actor.workspaceId);
+    expect(job).toMatchObject({ status: "done", importedCount: count, hasMore: index < 2, requestsMade: 1, maxRequestsPerRun: 1 });
+    expect((await store.load(actor)).state.searches[0].placeIds).toHaveLength(Math.min(55, (index + 1) * 20));
+    expect(await getQuotaUsage(scope, db)).toMatchObject({ used: index + 1, remaining: 19 - index, maxRequestsPerRun: 1, resultsPerRequest: 20 });
+  }
+  expect(transport).toHaveBeenCalledTimes(3);
+  const requests = transport.mock.calls.map((call) => JSON.parse(String(call[1]?.body)));
+  expect(requests.map((request) => request.pageToken)).toEqual([undefined, "next-20", "next-40"]);
+  expect(requests.map((request) => request.pageSize)).toEqual([20, 20, 20]);
+  await expect(startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db))
+    .rejects.toMatchObject({ code: "COLLECTION_EXHAUSTED" });
+  expect(transport).toHaveBeenCalledTimes(3);
+});
+
+test("failed import retries the saved page without another Google call and overlapping jobs are blocked", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+  await setRequestLimit(100);
+  const actor = { ...alice, workspaceId: "incremental-failure" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Retomar", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  let release!: (response: Response) => void;
+  const transport = vi.spyOn(globalThis, "fetch").mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+  const execute = vi.spyOn(MongoPortalStore.prototype, "execute").mockRejectedValueOnce(new Error("Importação indisponível"));
+  const scope = randomUUID();
+  const first = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+  await expect(startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db))
+    .rejects.toMatchObject({ code: "COLLECTION_ALREADY_RUNNING" });
+  release(Response.json({ places: [{ id: "saved-page-place" }] }));
+  expect(await waitForJob(first, actor.workspaceId)).toMatchObject({ status: "failed", requestsMade: 1 });
+  execute.mockRestore();
+  const retry = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  expect(await waitForJob(retry, actor.workspaceId)).toMatchObject({ status: "done", importedCount: 1, hasMore: false, requestsMade: 0 });
+  expect(transport).toHaveBeenCalledTimes(1);
+  expect((await store.load(actor)).state.searches[0].placeIds).toEqual(["saved-page-place"]);
+});
+
+test("duplicate Place IDs do not count toward the batch and legacy searches cannot silently restart", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+  const actor = { ...alice, workspaceId: "incremental-duplicates" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Duplicados", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  const transport = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({ places: [{ id: "a" }, { id: "a" }], nextPageToken: "page2" }))
+    .mockResolvedValueOnce(Response.json({ places: [{ id: "a" }, { id: "b" }] }));
+  const id = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", randomUUID(), client, db);
+  expect(await waitForJob(id, actor.workspaceId)).toMatchObject({ status: "done", importedCount: 2, hasMore: false });
+  expect((await store.load(actor)).state.searches[0].placeIds).toEqual(["a", "b"]);
+  await db.collection("collectionCursors").deleteOne({ workspaceId: actor.workspaceId });
+  await expect(startCollectionJob(actor, search.id, search.term, search.city, "fixture", randomUUID(), client, db))
+    .rejects.toMatchObject({ code: "COLLECTION_CURSOR_UNAVAILABLE" });
+  expect(transport).toHaveBeenCalledTimes(2);
+});
+
+test("a failed continuation preserves the token and imported progress instead of restarting the first page", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+  const actor = { ...alice, workspaceId: "incremental-transport-failure" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Falha temporária", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  const transport = vi.spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(Response.json({
+      places: Array.from({ length: 20 }, (_, index) => ({ id: `failure-place-${index}` })),
+      nextPageToken: "continue-after-20"
+    }))
+    .mockRejectedValueOnce(new Error("network"))
+    .mockResolvedValueOnce(Response.json({ places: [{ id: "failure-place-20" }] }));
+  const scope = randomUUID();
+  const first = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  expect(await waitForJob(first, actor.workspaceId)).toMatchObject({ status: "failed", collectedSoFar: 20, requestsMade: 2 });
+  const retry = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  expect(await waitForJob(retry, actor.workspaceId)).toMatchObject({ status: "done", importedCount: 1, hasMore: false, requestsMade: 1 });
+  expect((await store.load(actor)).state.searches[0].placeIds).toHaveLength(21);
+  expect(transport.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).pageToken))
+    .toEqual([undefined, "continue-after-20", "continue-after-20"]);
+});
+
+test("simultaneous initial requests claim only one collection cursor", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+  const actor = { ...alice, workspaceId: "incremental-race" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Concorrência", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  let release!: (response: Response) => void;
+  const transport = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+  const scope = randomUUID();
+  const results = await Promise.allSettled(Array.from({ length: 2 }, () =>
+    startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db)));
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  const rejected = results.find((result) => result.status === "rejected");
+  expect(rejected?.status === "rejected" && rejected.reason).toMatchObject({ code: "COLLECTION_ALREADY_RUNNING" });
+  await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+  release(Response.json({ places: [] }));
+  for (const result of results) {
+    if (result.status === "fulfilled") expect(await waitForJob(result.value, actor.workspaceId)).toMatchObject({ status: "done", hasMore: false });
+  }
+});
+
+test("request-based config defaults to 100 without reinterpreting legacy result limits and validates the 5000 ceiling", async () => {
+  vi.stubEnv("MONGODB_URI", server.getUri());
+  vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
+  vi.stubEnv("NEXTAUTH_URL", "http://localhost:3000");
+  vi.stubEnv("GOOGLE_COLLECTION_ENABLED", "true");
+  vi.stubEnv("GOOGLE_PLACES_API_KEY", "fixture-key");
+  vi.stubEnv("GOOGLE_PLACES_POLICY_ACKNOWLEDGED", "true");
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "5000");
+  vi.stubEnv("GOOGLE_PLACES_BILLING_SCOPE", randomUUID());
+  vi.spyOn(auth, "currentActor").mockResolvedValue(alice);
+  await db.collection<{ _id: string; maxResultsPerSearch: number }>("collectionConfig")
+    .replaceOne({ _id: "global" }, { maxResultsPerSearch: 25 }, { upsert: true });
+  expect(await (await getCollectionConfig(new Request("http://localhost:3000/api/v1/collection/config"))).json())
+    .toEqual({ maxRequestsPerRun: 100 });
+  const put = (body: unknown) => putCollectionConfig(new Request("http://localhost:3000/api/v1/collection/config", {
+    method: "PUT", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify(body)
+  }));
+  for (const limit of [0, 5001, 1.5]) expect((await put({ maxRequestsPerRun: limit })).status).toBe(400);
+  expect((await put({ maxResultsPerSearch: 100 })).status).toBe(400);
+  expect(await (await put({ maxRequestsPerRun: 5000 })).json()).toEqual({ maxRequestsPerRun: 5000 });
+  expect(await db.collection<{ _id: string }>("collectionConfig").findOne({ _id: "global" })).not.toHaveProperty("maxResultsPerSearch");
+});
+
+test("a configured 100-request execution never makes a 101st call and charges 100 of the monthly 5000", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "5000");
+  await setRequestLimit(100);
+  const actor = { ...alice, workspaceId: "exact-100-requests" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Limite exato", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  let page = 0;
+  const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+    const request = JSON.parse(String(options?.body));
+    expect(request.pageSize).toBe(20);
+    expect(request.pageToken).toBe(page === 0 ? undefined : `token-${page}`);
+    const current = page++;
+    return Response.json({
+      places: Array.from({ length: 20 }, (_, index) => ({ id: `page-${current}-place-${index}` })),
+      nextPageToken: `token-${page}`
+    });
+  });
+  const scope = randomUUID();
+  const id = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  await vi.waitFor(async () => expect((await getCollectionJob(id, actor.workspaceId, db))?.status).toBe("done"), { timeout: 30000 });
+  await waitForJob(id, actor.workspaceId);
+  expect(await getCollectionJob(id, actor.workspaceId, db)).toMatchObject({
+    status: "done", requestsMade: 100, maxRequestsPerRun: 100, importedCount: 2000, hasMore: true
+  });
+  expect(transport).toHaveBeenCalledTimes(100);
+  expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 100, limit: 5000, remaining: 4900 });
+  expect((await store.load(actor)).state.searches[0].placeIds).toHaveLength(2000);
+}, 40000);
+
+test("a smaller remaining monthly quota blocks further calls without charging the refused request", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "2");
+  await setRequestLimit(100);
+  const actor = { ...alice, workspaceId: "monthly-stop" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Cota restante", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  let page = 0;
+  const transport = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json({ places: [{ id: `monthly-${page++}` }], nextPageToken: `monthly-token-${page}` }));
+  const scope = randomUUID();
+  const id = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  expect(await waitForJob(id, actor.workspaceId)).toMatchObject({ status: "failed", requestsMade: 2, collectedSoFar: 2 });
+  expect(transport).toHaveBeenCalledTimes(2);
+  expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 2, remaining: 0 });
 });

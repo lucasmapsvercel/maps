@@ -1,21 +1,80 @@
-# Google Places: consultas sob demanda, sem mapa pago
+# Google Places: consultas sob demanda e coleta paginada
 
 ## Escopo implementado
 
 - Consulta explicita por termo/cidade de uma busca salva do workspace.
-- Uma chamada Text Search (New), com `pageSize=20`, sem paginacao ou retry automatico.
-- Campos: ID, nome, endereco, localizacao e atribuicoes; sem telefone, site,
-  fotos, avaliacoes, detalhes adicionais ou mapa JavaScript.
+- Busca direta: uma chamada Text Search (New). Coleta: paginacao com limite
+  de requisicoes por execucao, sempre com `pageSize=20`, sem retry automatico.
+- Campos: ID, nome, endereco, localizacao, categoria, telefone, site e
+  atribuicoes; sem fotos, avaliacoes ou mapa JavaScript pago.
 - Cidade incluida no texto da consulta: nao ha filtro por poligono municipal,
   geocodificacao, grade ou garantia de pertencimento/cobertura do municipio.
 - Lista com atribuicao Google Maps e de terceiros; filtro textual local
-  nao faz novas chamadas. Resultados Google nao aparecem no mapa ilustrativo.
-- Resposta HTTP `no-store`; conteudo so em memoria da tela, removido ao sair,
-  trocar de busca ou apos dez minutos. Esse prazo de exibicao nao e uma
-  autorizacao de cache/retencao. Nao ha exportacao nem persistencia dos resultados.
-- Favoritos/comentarios/overrides legados continuam funcionando para registros
-  internos existentes. Esta etapa nao conecta essas anotacoes aos resultados
-  temporarios Google e nao promove dados Google a dados internos.
+  nao faz novas chamadas.
+- Resposta HTTP `no-store`; a busca direta retorna dados temporarios. A coleta
+  em segundo plano importa resultados no workspace MongoDB e o mapa Leaflet
+  usa as coordenadas salvas.
+- Persistencia e exibicao devem ser revisadas contra as politicas e contrato
+  aplicaveis. O prazo de exibicao da busca direta nao autoriza retencao de
+  conteudo Google; a flag de reconhecimento nao substitui essa revisao.
+
+## Coleta incremental por requisicoes
+
+A coleta em segundo plano (`POST /api/v1/collection/run`) usa o limite de
+Configuracoes como **quantidade maxima de requisicoes por execucao**, nao
+como quantidade de estabelecimentos nem como teto acumulado da busca salva.
+O padrao e 100 requisicoes; sao aceitos inteiros entre 1 e 5000.
+Cada nova execucao tem seu proprio limite e continua da pagina anterior.
+
+A documentacao oficial consultada em 2026-10-30 define `pageSize` maximo de
+**20 resultados por requisicao**. O portal sempre solicita 20, inclusive nas
+paginas seguintes. Configurar 100 nao significa garantir 2000 resultados:
+o Google pode retornar menos itens ou encerrar a paginacao antes. Nao ha
+varredura territorial nem consultas alternativas para contornar esse fim.
+
+Exemplo: com limite 100 e cota mensal do sistema de 5000, uma execucao que
+realizar 100 chamadas consome 100 e deixa 4900 disponiveis. Se o Google
+encerrar apos 3 paginas, somente 3 sao consumidas. O limite mensal efetivo
+continua sendo `GOOGLE_PLACES_MONTHLY_LIMIT`, compartilhado entre usuarios e
+workspaces do mesmo escopo. Nenhuma reserva antecipada de 100 e feita.
+
+`GET/PUT /api/v1/collection/config` usa `{ "maxRequestsPerRun": 100 }`;
+o campo antigo `maxResultsPerSearch` nao e reinterpretado como requisicoes.
+Se apenas o campo antigo existir, aplica-se o novo padrao de 100; ao salvar,
+o campo antigo e removido. Jobs novos salvam `maxRequestsPerRun` e
+`requestsMade`, expostos nos endpoints de progresso. O limite vigente no
+inicio do job e preservado mesmo se a configuracao mudar durante a execucao.
+
+O cursor de cada busca/workspace fica em `collectionCursors`: proxima pagina,
+itens da pagina ainda nao importados e indicacao de esgotamento. Cada pagina
+e importada integralmente, sem cortes por quantidade de estabelecimentos.
+Itens pendentes de uma falha ou do formato anterior de lotes sao importados
+antes de novas chamadas e nao consomem novamente a cota. Esse buffer segue
+a mesma politica de armazenamento dos dados da coleta;
+nao faz parte dos logs de consultas e nao e exposto pelos endpoints de jobs.
+
+A pagina e salva antes da importacao, e o cursor so descarta itens apos
+importacao bem-sucedida. Falhas preservam o cursor; registros ja importados
+sao reconhecidos por Place ID. Apenas um job por busca pode executar por vez.
+A interface restaura o ultimo job ao reabrir a busca e permite continuar mesmo
+independentemente do total de estabelecimentos salvos. `hasMore: false` indica
+que o Google nao enviou proxima pagina e nao ha itens pendentes no buffer;
+novas coletas sao bloqueadas sem consumir cota.
+
+Tokens sao controlados pelo Google e podem deixar de ser validos. Nao ha
+reinicio automatico da primeira pagina em caso de token recusado. Buscas
+antigas cujos tokens foram descartados retornam `COLLECTION_CURSOR_UNAVAILABLE`;
+e necessario criar uma nova busca, pois nao existe continuacao confiavel
+recuperavel desses jobs. O esgotamento indica apenas o fim dos resultados
+disponibilizados pela API, nao cobertura de todos os estabelecimentos da cidade.
+
+Cada pagina, inclusive vazia ou contendo IDs repetidos, conta como uma
+requisicao. Falhas do provedor tambem contam e encerram a execucao sem retry.
+A reserva mensal, o contador do job e o recibo/log sao gravados na mesma
+transacao antes de cada chamada. O limite por execucao nunca e ultrapassado;
+ao atingi-lo, o job conclui com `hasMore: true` se ainda houver continuacao.
+A cota mensal menor que o limite por execucao interrompe novas chamadas com
+erro explicito, sem perder as paginas ja importadas nem o cursor.
 
 ## Franquia gratuita nao significa garantia de custo zero
 
@@ -26,8 +85,12 @@ Tabela global oficial consultada em 2026-10-29:
 | Text Search Pro | 5.000 eventos |
 | Dynamic Maps | 10.000 eventos, nao utilizado nesta versao |
 
-`displayName`, `formattedAddress` e `location` enquadram a consulta em Pro.
-Cada pagina/consulta pode ser um evento; o portal requisita apenas uma pagina.
+`displayName`, `formattedAddress` e `location` exigem pelo menos Pro.
+O adaptador atual tambem solicita `nationalPhoneNumber` e `websiteUri`, que
+acionam **Text Search Enterprise**, conforme a documentacao de campos/SKUs.
+A franquia Pro de 5000 nao e garantia de gratuidade para esses campos.
+O teto de 5000 no sistema e controle local de requisicoes, nao uma franquia
+financeira validada para a conta. Cada pagina/consulta pode ser um evento.
 Nao usar a franquia de IDs Only como se cobrisse os campos Pro.
 Confirme precos, elegibilidade e agregacao do consumo na conta real antes de ativar.
 
@@ -96,8 +159,9 @@ publico. A flag de reconhecimento nao substitui revisao contratual/juridica.
 Nao usar consultas repetidas para varredura sistematica ou formar um diretorio.
 
 Nao assumimos direito de armazenar todos os campos por um prazo generico.
-O MVP nao grava nem mesmo IDs retornados: nomes/enderecos/coordenadas nao
-entram no agregado do portal, recibos, auditoria ou logs da aplicacao.
+A coleta atual grava IDs e dados retornados no workspace e no buffer de
+retomada. Isso exige revisao de conformidade antes da ativacao. Os recibos,
+auditoria e logs nao incluem nomes/enderecos/coordenadas dos estabelecimentos.
 Garanta tambem que observabilidade externa nao capture corpos de resposta.
 
 ## Endpoint e consumo
@@ -117,8 +181,10 @@ parametros arbitrarios do provedor no corpo. Antes da chamada, reserva
 capacidade no MongoDB em transacao:
 
 - `googleSearchBudgets`: contador por mes/escopo, atualizado atomicamente.
-- `googleSearchRequests`: recibo unico de solicitacao, ator/workspace/data,
-  sem termo/cidade ou conteudo externo.
+- `googleSearchRequests`: recibo unico de solicitacao e log de consulta, com
+  ator/workspace/data, busca, termo/cidade informados pelo usuario, origem
+  (direta ou coleta), indicador de continuacao, status, duracao, quantidade
+  retornada e codigo de erro. Sem chave, token ou conteudo externo.
 
 Mesmo timeout, erro do Google ou queda depois da reserva permanece contabilizado.
 Nao ha reembolso de tentativa nem retry automatico: pode haver cobranca de
@@ -126,6 +192,30 @@ chamada em voo. Repetir UUID nao chama o Google novamente; retorna 409, pois
 a resposta nao esta armazenada. Nova consulta exige nova confirmacao e UUID.
 Os recibos/contadores sao pequenos metadados persistentes sem TTL nesta etapa;
 nao os apague durante a janela em que protegem a alocacao e a idempotencia.
+
+### Historico em Configuracoes
+
+`GET /api/v1/collection/logs` exige autenticacao e retorna no maximo as 100
+consultas mais recentes do workspace da sessao, em ordem decrescente de data.
+Nao depende de a integracao estar habilitada: o historico permanece acessivel
+apos desativar as consultas. A resposta usa `no-store` e nao expoe IDs de
+usuario, chaves ou tokens. Recibos antigos sem metadados nao sao apresentados.
+
+A tela **Configuracoes > Logs de consultas ao Google** carrega esse historico
+e oferece **Atualizar logs**, sem consultar o Google nem consumir cota.
+Cada pagina de uma coleta em segundo plano gera seu proprio registro, assim
+como a busca direta. O numero de resultados corresponde a pagina retornada,
+nao a quantidade importada ou deduplicada.
+
+O registro inicial e gravado na mesma transacao da reserva, antes de chamar
+o provedor. Sucesso e falha atualizam o registro com duracao em milissegundos;
+erros registram somente o codigo, nunca o corpo da resposta do Google.
+Se o processo terminar ou a gravacao final falhar, o registro fica **Sem
+conclusao registrada**, sem indicar sucesso. Reservas recusadas por limite
+ou UUID repetido nao geram novos logs, pois nao realizam chamadas.
+Os registros nao comprovam recebimento ou cobranca do lado Google e nao tem
+TTL, preservando a protecao de idempotencia dos recibos existentes.
+Execute a migracao padrao para criar o indice de workspace/data do historico.
 
 Codigos: `COLLECTION_DISABLED`, `COLLECTION_NOT_CONFIGURED`,
 `COLLECTION_BUDGET_REQUIRED`, `COLLECTION_CONFIGURATION_INVALID`,
@@ -148,5 +238,6 @@ deve ser feito pelo responsavel depois de verificar franquia, cotas e politicas.
 
 - [Precos globais](https://developers.google.com/maps/billing-and-pricing/pricing)
 - [Text Search e campos/SKUs](https://developers.google.com/maps/documentation/places/web-service/text-search)
+- [Referencia Text Search: pageSize e pageToken](https://developers.google.com/maps/documentation/places/web-service/reference/rest/v1/places/searchText)
 - [Politicas e atribuicao](https://developers.google.com/maps/documentation/places/web-service/policies)
 - [Uso e faturamento](https://developers.google.com/maps/documentation/places/web-service/usage-and-billing)

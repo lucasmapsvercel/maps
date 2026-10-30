@@ -2,6 +2,7 @@ import type { Portal } from "../use-portal";
 import { EmptyState } from "./common";
 import { PlaceList } from "./place-list";
 import { CollectionSettings } from "./collection-settings";
+import { GoogleSearchLogs } from "./google-search-logs";
 
 export function SavedSearches({ portal }: { portal: Portal }) {
   return <div className="saved-list">{portal.state.searches.length ? portal.state.searches.map((search) =>
@@ -26,7 +27,7 @@ export function Settings({ remote = false }: { remote?: boolean }) {
       <p>{remote ? "Portal autenticado com Google OAuth. Dados compartilhados no MongoDB; abas e filtros separados por usuário." : "Demonstração isolada para testes locais, com dados sintéticos."}</p>
       <div className="settings-grid">
         {[
-          ["Consulta de estabelecimentos", "Coleta em segundo plano: até N resultados por busca (configurável abaixo), salvos no MongoDB. Sem repetição de chamadas ao Google para buscas já coletadas.", remote ? "Habilitado" : "Configuração obrigatória"],
+          ["Consulta de estabelecimentos", "Limite de requisições por execução, descontadas da cota mensal compartilhada. Cada chamada solicita até 20 resultados e a coleta continua da página anterior até o Google não disponibilizar mais dados.", remote ? "Habilitado" : "Configuração obrigatória"],
           ["Mapa", "Pins Leaflet com coordenadas reais dos estabelecimentos coletados.", "OpenStreetMap"],
           ["Dados e armazenamento", remote ? "Buscas, comentários, favoritos e ajustes persistem no MongoDB. O navegador não é a fonte dos dados." : "Dados sintéticos neste navegador.", remote ? "MongoDB" : "Armazenamento local"],
           ["Acesso e segurança", remote ? "Google OAuth, e-mails verificados e lista de acesso definida pelo administrador." : "Somente demonstração.", remote ? "Autenticado" : "Teste isolado"]
@@ -42,5 +43,6 @@ export function Settings({ remote = false }: { remote?: boolean }) {
         </div>
       </section>
     )}
+    {remote && <GoogleSearchLogs />}
   </>;
 }

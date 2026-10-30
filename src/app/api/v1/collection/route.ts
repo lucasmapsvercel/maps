@@ -4,7 +4,7 @@ import { authenticatedApi, json, readJson } from "../../../../infrastructure/ser
 import { validateCollectionRequest } from "../../../../infrastructure/server/runtime-config";
 import { mongoClient, mongoDatabase } from "../../../../infrastructure/server/mongo";
 import { MongoPortalStore } from "../../../../infrastructure/server/mongo-portal-store";
-import { GoogleSearchBudget } from "../../../../infrastructure/server/google-search-budget";
+import { LoggedGoogleSearch } from "../../../../infrastructure/server/logged-google-search";
 import { GoogleTextSearchProvider } from "../../../../infrastructure/server/google-places-provider";
 import { consumeMutationLimit } from "../../../../infrastructure/server/rate-limit";
 import { secret } from "../../../../infrastructure/server/config";
@@ -24,9 +24,10 @@ export function POST(request: Request) {
     const search = snapshot.state.searches.find((item) => item.id === body.searchId);
     if (!search || search.demo) throw new PortalError(404, "SEARCH_NOT_FOUND", "Busca não encontrada neste workspace.");
     await consumeMutationLimit(db, actor);
-    await new GoogleSearchBudget(client, db).reserve(actor, body.requestId,
-      Number(process.env.GOOGLE_PLACES_MONTHLY_LIMIT), secret("GOOGLE_PLACES_BILLING_SCOPE"));
-    const result = await new GoogleTextSearchProvider(apiKey).search(search.term, search.city);
+    const result = await new LoggedGoogleSearch(client, db, new GoogleTextSearchProvider(apiKey)).search(actor, {
+      requestId: body.requestId, searchId: search.id, term: search.term, city: search.city, source: "direct",
+      limit: Number(process.env.GOOGLE_PLACES_MONTHLY_LIMIT), billingScope: secret("GOOGLE_PLACES_BILLING_SCOPE")
+    });
     return json({ ...result, searchId: body.searchId });
   });
 }

@@ -13,7 +13,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     const job = await getCollectionJob(jobId, actor.workspaceId, db);
     if (!job) throw new PortalError(404, "JOB_NOT_FOUND", "Job não encontrado.");
     return json({
-      id: job._id, status: job.status, importedCount: job.importedCount, error: job.error,
+      id: job._id, status: job.status, importedCount: job.importedCount, error: job.error, hasMore: job.hasMore,
+      requestsMade: job.requestsMade, maxRequestsPerRun: job.maxRequestsPerRun,
       createdAt: job.createdAt.toISOString(),
       startedAt: job.startedAt?.toISOString(),
       finishedAt: job.finishedAt?.toISOString()

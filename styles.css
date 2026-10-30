@@ -312,6 +312,12 @@ button:disabled {
 .badge-done { background: var(--green-soft); color: var(--green-dark); }
 .badge-failed { background: #fdecea; color: var(--red); }
 .collection-error { font-size: 11px; color: var(--red); margin: 8px 0 0; }
+.google-log-scroll { max-width: 100%; overflow-x: auto; margin-top: 16px; }
+.google-log-table { width: 100%; border-collapse: collapse; font-size: 11px; text-align: left; }
+.google-log-table caption { text-align: left; color: var(--muted); padding-bottom: 10px; }
+.google-log-table th, .google-log-table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.google-log-table th { white-space: nowrap; }
+.google-log-table td { min-width: 100px; overflow-wrap: anywhere; }
 
 /* Mapa Leaflet */
 .map-panel { display: flex; flex-direction: column; }

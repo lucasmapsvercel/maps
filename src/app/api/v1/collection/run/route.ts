@@ -44,7 +44,8 @@ export function GET(request: Request) {
     const db = await mongoDatabase();
     const jobs = await listCollectionJobs(searchId, actor.workspaceId, db);
     return json(jobs.map((j) => ({
-      id: j._id, status: j.status, importedCount: j.importedCount, error: j.error,
+      id: j._id, status: j.status, importedCount: j.importedCount, error: j.error, hasMore: j.hasMore,
+      requestsMade: j.requestsMade, maxRequestsPerRun: j.maxRequestsPerRun,
       createdAt: j.createdAt.toISOString(),
       startedAt: j.startedAt?.toISOString(),
       finishedAt: j.finishedAt?.toISOString()

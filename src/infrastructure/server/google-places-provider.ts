@@ -2,6 +2,7 @@ import { z } from "zod";
 import { PortalError } from "../../application/portal-error";
 import type { GooglePlacesProvider } from "../../application/google-search";
 import type { GoogleSearchResult } from "../../domain/google-search";
+import { GOOGLE_TEXT_SEARCH_PAGE_SIZE } from "../../domain/collection-config";
 
 const responseSchema = z.object({
   places: z.array(z.object({
@@ -16,7 +17,7 @@ const responseSchema = z.object({
       provider: z.string().max(500),
       providerUri: z.url().refine((value) => new URL(value).protocol === "https:").optional()
     })).optional()
-  })).max(20).optional(),
+  })).max(GOOGLE_TEXT_SEARCH_PAGE_SIZE).optional(),
   nextPageToken: z.string().optional()
 });
 
@@ -34,7 +35,7 @@ export class GoogleTextSearchProvider implements GooglePlacesProvider {
           "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.nationalPhoneNumber,places.websiteUri,places.attributions,nextPageToken"
         },
         body: JSON.stringify({
-          textQuery: `${term} em ${city}`, languageCode: "pt-BR", regionCode: "BR", pageSize: 20,
+          textQuery: `${term} em ${city}`, languageCode: "pt-BR", regionCode: "BR", pageSize: GOOGLE_TEXT_SEARCH_PAGE_SIZE,
           ...(pageToken ? { pageToken } : {})
         }),
         cache: "no-store",
@@ -69,7 +70,7 @@ export class GoogleTextSearchProvider implements GooglePlacesProvider {
         attributions: place.attributions || []
       })),
       expiresAt: new Date(Date.now() + 10 * 60000).toISOString(),
-      limited: Boolean(parsed.data.nextPageToken) || parsed.data.places?.length === 20,
+      limited: Boolean(parsed.data.nextPageToken) || parsed.data.places?.length === GOOGLE_TEXT_SEARCH_PAGE_SIZE,
       nextPageToken: parsed.data.nextPageToken
     };
   }

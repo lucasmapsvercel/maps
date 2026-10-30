@@ -9,7 +9,8 @@ export async function ensurePortalIndexes(db: Db) {
     db.collection("commandReceipts").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("apiRateLimits").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
     db.collection("collectionJobs").createIndex({ searchId: 1, workspaceId: 1, createdAt: -1 }),
-    db.collection("collectionJobs").createIndex({ workspaceId: 1 })
+    db.collection("collectionJobs").createIndex({ workspaceId: 1 }),
+    db.collection("googleSearchRequests").createIndex({ workspaceId: 1, createdAt: -1, _id: -1 })
   ]);
 }
 
