@@ -37,6 +37,7 @@ export class PortalService {
       case "addComment": return this.addComment(command.id, command.text);
       case "editPlace": return this.editPlace(command.id, command);
       case "clearOverrides": return this.clearOverrides(command.id);
+      case "importPlaces": return this.importPlaces(command.searchId, command.places);
       case "setFilter": {
         const filter = command.filter;
         switch (filter.name) {
@@ -139,6 +140,32 @@ export class PortalService {
   clearOverrides(id: string) {
     this.getPlace(id);
     delete this.state.overrides[id];
+  }
+
+  importPlaces(searchId: string, places: Array<{
+    id: string; name: string; address: string; category: string;
+    latitude?: number; longitude?: number; phone?: string; website?: string;
+  }>) {
+    const search = this.state.searches.find((s) => s.id === searchId);
+    if (!search) throw new ValidationError("Busca não encontrada.");
+    if (search.demo) throw new ValidationError("Não é possível importar dados em uma busca demonstrativa.");
+    let added = 0;
+    for (const p of places) {
+      if (!Object.hasOwn(this.state.places, p.id)) {
+        this.state.places[p.id] = {
+          id: p.id, name: p.name, address: p.address, category: p.category,
+          ...(p.latitude !== undefined ? { latitude: p.latitude } : {}),
+          ...(p.longitude !== undefined ? { longitude: p.longitude } : {}),
+          ...(p.phone ? { phone: p.phone } : {}),
+          ...(p.website ? { website: p.website } : {})
+        };
+        added++;
+      }
+      if (!search.placeIds.includes(p.id)) {
+        search.placeIds.push(p.id);
+      }
+    }
+    return added;
   }
 
   setFilter<K extends keyof PortalFilters>(name: K, value: PortalFilters[K]) {

@@ -7,8 +7,8 @@ export interface Place {
   name: string;
   address: string;
   category: string;
-  x?: number;
-  y?: number;
+  latitude?: number;
+  longitude?: number;
   phone?: string;
   website?: string;
 }

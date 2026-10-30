@@ -19,14 +19,14 @@ test("React filters map and list together and restores all markers when clearing
   const { repository } = fixture();
   const user = userEvent.setup();
   render(<App repository={repository} />);
-  const map = screen.getByRole("region", { name: "Mapa demonstrativo" });
+  const map = screen.getByRole("region", { name: "Mapa de estabelecimentos" });
   const list = screen.getByRole("region", { name: "Lista de resultados" });
-  expect(within(map).getAllByRole("button")).toHaveLength(5);
+  expect(within(map).getByText(/5 pontos/)).toBeInTheDocument();
   await user.type(screen.getByRole("searchbox"), "Norte");
-  expect(within(map).getAllByRole("button")).toHaveLength(1);
+  expect(within(map).getByText(/1 ponto/)).toBeInTheDocument();
   expect(within(list).getByText("Loja Modelo Norte")).toBeInTheDocument();
   await user.clear(screen.getByRole("searchbox"));
-  expect(within(map).getAllByRole("button")).toHaveLength(5);
+  expect(within(map).getByText(/5 pontos/)).toBeInTheDocument();
 });
 
 test("favorite, comment, override, hide and restore remain functional across remounts", async () => {

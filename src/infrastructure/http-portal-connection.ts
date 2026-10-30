@@ -46,4 +46,11 @@ export class HttpPortalConnection implements PortalConnection {
     this.version = snapshot.version;
     return snapshot.state;
   }
+
+  async reload() {
+    const response = await fetch("/api/v1/portal", { cache: "no-store" });
+    const snapshot = await decode(response);
+    this.version = snapshot.version;
+    return snapshot.state;
+  }
 }

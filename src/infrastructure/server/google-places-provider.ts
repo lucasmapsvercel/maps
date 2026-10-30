@@ -9,6 +9,9 @@ const responseSchema = z.object({
     displayName: z.object({ text: z.string().max(1000) }).optional(),
     formattedAddress: z.string().max(2000).optional(),
     location: z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) }).optional(),
+    primaryType: z.string().max(200).optional(),
+    nationalPhoneNumber: z.string().max(60).optional(),
+    websiteUri: z.string().max(500).optional(),
     attributions: z.array(z.object({
       provider: z.string().max(500),
       providerUri: z.url().refine((value) => new URL(value).protocol === "https:").optional()
@@ -20,7 +23,7 @@ const responseSchema = z.object({
 export class GoogleTextSearchProvider implements GooglePlacesProvider {
   constructor(private readonly apiKey: string, private readonly transport: typeof fetch = fetch) {}
 
-  async search(term: string, city: string): Promise<GoogleSearchResult> {
+  async search(term: string, city: string, pageToken?: string): Promise<GoogleSearchResult> {
     let response: Response;
     try {
       response = await this.transport("https://places.googleapis.com/v1/places:searchText", {
@@ -28,9 +31,12 @@ export class GoogleTextSearchProvider implements GooglePlacesProvider {
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": this.apiKey,
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.attributions,nextPageToken"
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.nationalPhoneNumber,places.websiteUri,places.attributions,nextPageToken"
         },
-        body: JSON.stringify({ textQuery: `${term} em ${city}`, languageCode: "pt-BR", regionCode: "BR", pageSize: 20 }),
+        body: JSON.stringify({
+          textQuery: `${term} em ${city}`, languageCode: "pt-BR", regionCode: "BR", pageSize: 20,
+          ...(pageToken ? { pageToken } : {})
+        }),
         cache: "no-store",
         signal: AbortSignal.timeout(10000),
         redirect: "error"
@@ -56,11 +62,15 @@ export class GoogleTextSearchProvider implements GooglePlacesProvider {
       places: (parsed.data.places || []).map((place) => ({
         id: place.id, name: place.displayName?.text || "Nome não informado",
         address: place.formattedAddress || "Endereço não informado",
+        category: place.primaryType || "",
         latitude: place.location?.latitude, longitude: place.location?.longitude,
+        phone: place.nationalPhoneNumber,
+        website: place.websiteUri,
         attributions: place.attributions || []
       })),
       expiresAt: new Date(Date.now() + 10 * 60000).toISOString(),
-      limited: Boolean(parsed.data.nextPageToken) || parsed.data.places?.length === 20
+      limited: Boolean(parsed.data.nextPageToken) || parsed.data.places?.length === 20,
+      nextPageToken: parsed.data.nextPageToken
     };
   }
 }

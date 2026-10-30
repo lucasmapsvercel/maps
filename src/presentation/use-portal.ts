@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { PortalService } from "../application/portal-service";
 import type { PortalConnection } from "../application/portal-connection";
 import { isViewCommand, type PortalCommand } from "../domain/portal-command";
@@ -94,7 +94,18 @@ export function usePortal(source: PortalRepository | PortalConnection) {
     return result;
   }
 
-  return { service, state: service.state, notice, mutate, pending, remote };
+  const forceRefresh = useCallback(async () => {
+    if (!remote) return;
+    try {
+      const state = await (source as PortalConnection).reload();
+      service.state = state;
+      setRevision((v) => v + 1);
+    } catch (error) {
+      setNotice({ message: errorMessage(error), error: true });
+    }
+  }, [remote, source, service]);
+
+  return { service, state: service.state, notice, mutate, pending, remote, forceRefresh };
 }
 
 export type Portal = ReturnType<typeof usePortal>;

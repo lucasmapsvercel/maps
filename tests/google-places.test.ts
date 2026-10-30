@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import { GoogleTextSearchProvider } from "../src/infrastructure/server/google-places-provider";
 import { validateCollectionRequest } from "../src/infrastructure/server/runtime-config";
 
-test("Google adapter requests only Pro fields with exactly one call and never follows pagination", async () => {
+test("Google adapter sends exactly one HTTP request per search() call without pageToken", async () => {
   const transport = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
     places: [{ id: "fixture-google-id", displayName: { text: "Empresa sintética" }, formattedAddress: "Endereço de teste",
       location: { latitude: -1.4, longitude: -48.4 }, attributions: [{ provider: "Fixture", providerUri: "https://example.test" }] }],
@@ -14,11 +14,26 @@ test("Google adapter requests only Pro fields with exactly one call and never fo
   const [url, options] = transport.mock.calls[0];
   expect(url).toBe("https://places.googleapis.com/v1/places:searchText");
   expect(options?.headers).toMatchObject({ "X-Goog-Api-Key": "fixture-key",
-    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.attributions,nextPageToken" });
-  expect(JSON.parse(String(options?.body))).toEqual({ textQuery: "Teste em Belém, PA, Brasil", languageCode: "pt-BR", regionCode: "BR", pageSize: 20 });
+    "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.nationalPhoneNumber,places.websiteUri,places.attributions,nextPageToken" });
+  const body = JSON.parse(String(options?.body));
+  expect(body).toEqual({ textQuery: "Teste em Belém, PA, Brasil", languageCode: "pt-BR", regionCode: "BR", pageSize: 20 });
+  expect(body).not.toHaveProperty("pageToken");
   expect(options?.cache).toBe("no-store");
   expect(result.limited).toBe(true);
+  expect(result.nextPageToken).toBe("fixture-next-page");
   expect(result.places[0]).toMatchObject({ id: "fixture-google-id", name: "Empresa sintética", latitude: -1.4 });
+});
+
+test("Google adapter includes pageToken in body when continuing pagination", async () => {
+  const transport = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+    places: [{ id: "fixture-page2-id", displayName: { text: "Empresa página 2" }, formattedAddress: "Rua 2", attributions: [] }]
+  }));
+  const result = await new GoogleTextSearchProvider("fixture-key", transport).search("Teste", "Belém", "token-pagina-anterior");
+  expect(transport).toHaveBeenCalledTimes(1);
+  const body = JSON.parse(String(transport.mock.calls[0][1]?.body));
+  expect(body).toMatchObject({ textQuery: "Teste em Belém", pageToken: "token-pagina-anterior" });
+  expect(result.nextPageToken).toBeUndefined();
+  expect(result.limited).toBe(false);
 });
 
 test.each([403, 429, 500])("Google status %s returns a safe explicit error without automatic retries", async (status) => {

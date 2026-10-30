@@ -27,6 +27,6 @@ export function POST(request: Request) {
     await new GoogleSearchBudget(client, db).reserve(actor, body.requestId,
       Number(process.env.GOOGLE_PLACES_MONTHLY_LIMIT), secret("GOOGLE_PLACES_BILLING_SCOPE"));
     const result = await new GoogleTextSearchProvider(apiKey).search(search.term, search.city);
-    return json(result);
+    return json({ ...result, searchId: body.searchId });
   });
 }

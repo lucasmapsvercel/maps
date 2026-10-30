@@ -9,4 +9,5 @@ export interface PortalSnapshot {
 export interface PortalConnection {
   initialState: PortalState;
   execute(command: PortalCommand): Promise<PortalState>;
+  reload(): Promise<PortalState>;
 }

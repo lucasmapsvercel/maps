@@ -43,8 +43,8 @@ function isSearch(value: unknown): value is SavedSearch {
 function isPlace(value: unknown): value is Place {
   return record(value) && ["id", "name", "address", "category"].every((key) => typeof value[key] === "string")
     && ["phone", "website"].every((key) => value[key] === undefined || typeof value[key] === "string")
-    && ["x", "y"].every((key) => value[key] === undefined
-      || (typeof value[key] === "number" && Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 100));
+    && (value.latitude === undefined || (typeof value.latitude === "number" && Number.isFinite(value.latitude) && value.latitude >= -90 && value.latitude <= 90))
+    && (value.longitude === undefined || (typeof value.longitude === "number" && Number.isFinite(value.longitude) && value.longitude >= -180 && value.longitude <= 180));
 }
 
 function isOverride(value: unknown): value is LocalOverrides {
