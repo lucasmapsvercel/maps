@@ -319,6 +319,11 @@ button:disabled {
 .google-log-table th { white-space: nowrap; }
 .google-log-table td { min-width: 100px; overflow-wrap: anywhere; }
 .google-log-json { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; }
+.municipality-picker > small { display: block; margin-top: 6px; color: var(--muted); font-size: 11px; }
+.municipality-options { max-height: 220px; overflow-y: auto; padding: 0; margin: 8px 0; list-style: none; border: 1px solid var(--line); border-radius: 6px; }
+.municipality-options [role="option"] { padding: 10px 12px; cursor: pointer; font-size: 12px; }
+.municipality-options [role="option"]:hover, .municipality-options [aria-selected="true"] { background: var(--green-soft); }
+.municipality-options small { display: block; color: var(--muted); margin-top: 3px; }
 
 /* Mapa Leaflet */
 .map-panel { display: flex; flex-direction: column; }

@@ -59,6 +59,17 @@ test("search validation rejects empty city and terms outside 2..200 characters w
   expect(service.activeSearch()?.term).toHaveLength(200);
 });
 
+test("selected municipalities produce standardized Google query cities and legacy saved searches remain valid", () => {
+  const { service, repository } = fixture();
+  const municipality = { ibgeCode: "1501402", name: "Belém", stateCode: "PA" as const, stateName: "Pará", country: "Brasil" as const };
+  service.execute({ type: "addSearch", term: "Farmácia", city: "Ignored free text", municipality });
+  expect(service.activeSearch()).toMatchObject({ city: "Belém, Pará, Brasil", municipality });
+  service.save();
+  expect(repository.load()?.searches[0].municipality).toEqual(municipality);
+  expect(repository.load()?.searches[1].municipality).toBeUndefined();
+  expect(() => validateState({ ...service.state, searches: [{ ...service.state.searches[0], municipality: { ...municipality, ibgeCode: "invalid" } }] })).toThrow();
+});
+
 test("favorites, comments and overrides belong to a place; hiding belongs to the active search", () => {
   const { service, repository } = fixture();
   service.addSearch("Farmácia", "Belém");

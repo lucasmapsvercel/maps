@@ -2,6 +2,7 @@ import { effectivePlace, filterPlaceIds, validateSearch } from "../domain/portal
 import type { LocalOverrides, Page, PortalFilters, PortalRepository, PortalState } from "../domain/types";
 import type { PortalCommand } from "../domain/portal-command";
 import { ValidationError } from "../domain/validation-error";
+import { municipalityCity, municipalitySchema, type Municipality } from "../domain/municipality";
 
 export class PortalService {
   state: PortalState;
@@ -28,7 +29,7 @@ export class PortalService {
 
   execute(command: PortalCommand) {
     switch (command.type) {
-      case "addSearch": return this.addSearch(command.term, command.city);
+      case "addSearch": return this.addSearch(command.term, command.city, command.municipality);
       case "openSearch": return this.openSearch(command.id);
       case "deleteSearch": return this.deleteSearch(command.id);
       case "closeTab": return this.closeTab(command.id);
@@ -69,11 +70,12 @@ export class PortalService {
       : this.state.searches.find((search) => search.placeIds.includes(id)) || null;
   }
 
-  addSearch(term: string, city: string) {
-    const values = validateSearch(term, city);
+  addSearch(term: string, city: string, municipality?: Municipality) {
+    const selected = municipality ? municipalitySchema.parse(municipality) : undefined;
+    const values = validateSearch(term, selected ? municipalityCity(selected) : city);
     const search = {
       id: `search-${this.createId()}`, ...values, placeIds: [], hiddenIds: [],
-      createdAt: this.clock(), demo: false
+      createdAt: this.clock(), demo: false, ...(selected ? { municipality: selected } : {})
     };
     this.state.searches.unshift(search);
     this.openSearch(search.id);

@@ -9,6 +9,7 @@ coleta real, ainda nao implementado. A interface atual funciona com:
 | --- | --- |
 | `GET/POST /api/auth/*` | NextAuth, Google OAuth, cookies de sessao e CSRF |
 | `GET /api/v1/portal` | Snapshot Mongo do workspace e view do usuario, com versao |
+| `GET /api/v1/municipalities` | Catalogo de municipios IBGE normalizado, exige sessao; nao usa Google |
 | `POST /api/v1/portal` | `{ version, commandId, command }`, sem estado/autor/workspace do cliente |
 | `POST /api/v1/collection` | Consulta Google explicita, uma pagina temporaria; valida flag, chave, politicas e reserva mensal |
 | `GET /api/health` | Liveness sem banco |
@@ -18,6 +19,21 @@ Comandos: `addSearch`, `deleteSearch`, `openSearch`, `closeTab`, `navigate`, `se
 `toggleFavorite`, `toggleHidden`, `addComment`, `editPlace`, `clearOverrides`.
 Schemas estritos em `src/domain/portal-command.ts`. Comando recebe somente
 campos permitidos; IDs, data e autor novos sao definidos pelo servidor.
+Para `addSearch` via HTTP, `municipality` e obrigatorio:
+`{ ibgeCode, name, stateCode, stateName, country: "Brasil" }`.
+O servidor valida o codigo no IBGE e substitui `city` e os nomes por valores
+oficiais antes de persistir. Ausencia de selecao retorna `MUNICIPALITY_REQUIRED`;
+codigo desconhecido retorna `MUNICIPALITY_NOT_FOUND`. Buscas antigas com
+somente `city` continuam compativeis; nao ha migracao automatica por nome.
+
+O catalogo vem de
+`https://servicodados.ibge.gov.br/api/v1/localidades/municipios?orderBy=nome`,
+com cache em memoria de 24 horas por processo e coalescencia de chamadas
+concorrentes. O navegador carrega o catalogo uma vez ao abrir o formulario
+e filtra localmente, sem requisicoes por tecla. O backend retorna erros
+explicitos se o IBGE falhar; nao usa catalogo inventado ou lista vazia de sucesso.
+Nao ha chave nem consumo de cota Google nesse fluxo.
+
 As respostas do portal sao `{ state, version }`; erros possuem `error`, `code`
 e identificador de requisicao. Todas as leituras sao locais, sem coleta.
 

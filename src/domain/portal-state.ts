@@ -1,5 +1,6 @@
 import type { Comment, LocalOverrides, Place, PortalState, SavedSearch } from "./types";
 import { ValidationError } from "./validation-error";
+import { municipalitySchema } from "./municipality";
 
 export function validateSearch(term: string, city: string) {
   const search = { term: term.trim(), city: city.trim() };
@@ -37,7 +38,8 @@ const strings = (value: unknown): value is string[] =>
 
 function isSearch(value: unknown): value is SavedSearch {
   return record(value) && ["id", "term", "city", "createdAt"].every((key) => typeof value[key] === "string")
-    && typeof value.demo === "boolean" && strings(value.placeIds) && strings(value.hiddenIds);
+    && typeof value.demo === "boolean" && strings(value.placeIds) && strings(value.hiddenIds)
+    && (value.municipality === undefined || municipalitySchema.safeParse(value.municipality).success);
 }
 
 function isPlace(value: unknown): value is Place {

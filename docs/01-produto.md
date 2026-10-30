@@ -29,6 +29,24 @@ Termos livres representam intencao de busca, nao correspondencia literal garanti
 
 ## Abas e navegacao
 
+### Selecao de municipio implementada
+
+Novas buscas exigem selecionar uma opcao do catalogo oficial do IBGE.
+O campo pesquisa por nome, UF ou estado, ignorando acentos e maiusculas.
+Homonimos aparecem separadamente, por exemplo Belem - PA e Belem - AL;
+nome digitado sem selecionar uma opcao nao permite salvar. A selecao funciona
+por mouse ou teclado (setas e Enter), sem municipio preselecionado.
+
+A busca armazena codigo IBGE, nome oficial, UF, nome do estado e pais.
+O servidor confere o codigo no catalogo e resolve os nomes oficiais, sem
+confiar no texto enviado pelo navegador. A consulta Google usa
+`termo em municipio, estado, Brasil`. A selecao nao consome Google Places.
+Buscas antigas sem identificacao IBGE permanecem legiveis e inalteradas.
+
+Esta primeira etapa nao valida coordenadas contra o poligono municipal:
+o Google ainda pode retornar estabelecimentos de cidades proximas.
+Confirmacao de limites e filtragem territorial ficam para uma etapa futura.
+
 - **Nova busca**: termo, municipio, variacoes opcionais do termo, campos desejados e limite de requisicoes/custo.
 - **Buscas salvas**: lista persistente com termo, municipio, ultima execucao, contagem e situacao.
 - **Abas de resultados**: uma por busca aberta, por exemplo `Aparelho Auditivo - Belem` e `Farmacia - Belem`. Cada aba preserva filtros, selecao e enquadramento do mapa por usuario.

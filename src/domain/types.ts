@@ -1,3 +1,5 @@
+import type { Municipality } from "./municipality";
+
 export type Page = "dashboard" | "saved" | "favorites" | "settings";
 export type Visibility = "visible" | "hidden" | "all";
 export type MobileView = "map" | "list";
@@ -17,6 +19,7 @@ export interface SavedSearch {
   id: string;
   term: string;
   city: string;
+  municipality?: Municipality;
   placeIds: string[];
   hiddenIds: string[];
   createdAt: string;

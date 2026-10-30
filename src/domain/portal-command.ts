@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { municipalitySchema } from "./municipality";
 
 const id = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/)
   .refine((value) => !["__proto__", "prototype", "constructor"].includes(value));
@@ -21,7 +22,7 @@ const importedPlace = z.strictObject({
 });
 
 export const portalCommandSchema = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("addSearch"), term: z.string().trim().min(2).max(200), city: z.string().trim().min(1).max(200) }),
+  z.strictObject({ type: z.literal("addSearch"), term: z.string().trim().min(2).max(200), city: z.string().trim().min(1).max(200), municipality: municipalitySchema.optional() }),
   z.strictObject({ type: z.literal("openSearch"), id }),
   z.strictObject({ type: z.literal("deleteSearch"), id }),
   z.strictObject({ type: z.literal("closeTab"), id }),

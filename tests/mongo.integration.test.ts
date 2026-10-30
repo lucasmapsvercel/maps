@@ -21,6 +21,7 @@ import { GET as getLogs } from "../src/app/api/v1/collection/logs/route";
 import { GET as getLogDetails } from "../src/app/api/v1/collection/logs/[logId]/route";
 import { GoogleTextSearchProvider } from "../src/infrastructure/server/google-places-provider";
 import type { GoogleSearchDetailsDocument } from "../src/infrastructure/server/logged-google-search";
+import { ibgeMunicipalities } from "../src/infrastructure/server/ibge-municipalities";
 import { startCollectionJob, getCollectionJob, getQuotaUsage } from "../src/infrastructure/server/collection-runner";
 import { GET as getCollectionConfig, PUT as putCollectionConfig } from "../src/app/api/v1/collection/config/route";
 
@@ -130,6 +131,8 @@ test("favorite, override, hide and authored comments persist atomically; duplica
 });
 
 test("HTTP API denies anonymous access and CSRF, persists authorized commands and reports blocked collection", async () => {
+  const municipality = { ibgeCode: "1501402", name: "Belém", stateCode: "PA" as const, stateName: "Pará", country: "Brasil" as const };
+  vi.spyOn(ibgeMunicipalities, "list").mockResolvedValue([municipality]);
   vi.stubEnv("MONGODB_URI", server.getUri());
   vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
   vi.stubEnv("NEXTAUTH_URL", "http://localhost:3000");
@@ -141,10 +144,15 @@ test("HTTP API denies anonymous access and CSRF, persists authorized commands an
   const response = await POST(new Request("http://localhost:3000/api/v1/portal", {
     method: "POST",
     headers: { origin: "http://localhost:3000", "content-type": "application/json" },
-    body: JSON.stringify({ version: current.version, commandId: randomUUID(), command: { type: "addSearch", term: "Busca HTTP", city: "Belém" } })
+    body: JSON.stringify({ version: current.version, commandId: randomUUID(), command: {
+      type: "addSearch", term: "Busca HTTP", city: "Texto arbitrário", municipality: { ...municipality, name: "Nome adulterado" }
+    } })
   }));
   expect(response.status).toBe(200);
   expect((await store.load(alice)).state.searches[0].term).toBe("Busca HTTP");
+  expect((await store.load(alice)).state.searches[0]).toMatchObject({
+    city: "Belém, Pará, Brasil", municipality
+  });
   vi.stubEnv("GOOGLE_COLLECTION_ENABLED", "true");
   const blocked = await collect(new Request("http://localhost:3000/api/v1/collection", {
     method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" }, body: "{}"
@@ -643,4 +651,28 @@ test("Google request/response details persist for 30 days, isolate workspaces, a
   expect((await read()).status).toBe(404);
   expect(await db.collection("googleSearchRequests").countDocuments({ workspaceId: actor.workspaceId })).toBe(2);
   expect((await detailsCollection.indexes()).some((index) => index.expireAfterSeconds === 0)).toBe(true);
+});
+
+test("new search HTTP API requires an IBGE selection and rejects unknown municipality codes", async () => {
+  vi.stubEnv("MONGODB_URI", server.getUri());
+  vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
+  vi.stubEnv("NEXTAUTH_URL", "http://localhost:3000");
+  const actor = { ...alice, workspaceId: "municipality-validation" };
+  vi.spyOn(auth, "currentActor").mockResolvedValue(actor);
+  const municipality = { ibgeCode: "1501402", name: "Belém", stateCode: "PA" as const, stateName: "Pará", country: "Brasil" as const };
+  const catalog = vi.spyOn(ibgeMunicipalities, "list").mockResolvedValue([municipality]);
+  const initial = await store.load(actor);
+  const send = (command: unknown) => POST(new Request("http://localhost:3000/api/v1/portal", {
+    method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" },
+    body: JSON.stringify({ version: initial.version, commandId: randomUUID(), command })
+  }));
+  const base = { type: "addSearch", term: "Clínica", city: "Belém" };
+  const missing = await send(base);
+  expect(missing.status).toBe(400);
+  expect(await missing.json()).toMatchObject({ code: "MUNICIPALITY_REQUIRED" });
+  expect(catalog).not.toHaveBeenCalled();
+  const invalid = await send({ ...base, municipality: { ...municipality, ibgeCode: "9999999" } });
+  expect(invalid.status).toBe(400);
+  expect(await invalid.json()).toMatchObject({ code: "MUNICIPALITY_NOT_FOUND" });
+  expect((await store.load(actor)).state.searches).toEqual([]);
 });

@@ -64,11 +64,18 @@ test("React saves independent search tabs, closes without deleting and reopens s
   const { repository } = fixture();
   const user = userEvent.setup();
   render(<App repository={repository} />);
+  const transport = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ municipalities: [{
+    ibgeCode: "1501402", name: "Belém", stateCode: "PA", stateName: "Pará", country: "Brasil"
+  }] }));
   await user.click(screen.getByRole("button", { name: "＋ Nova busca" }));
   const dialog = screen.getByRole("dialog");
   await user.type(within(dialog).getByLabelText("Termo de pesquisa"), "Farmácia");
+  await user.type(within(dialog).getByRole("combobox", { name: "Município" }), "belem");
+  await user.click(await within(dialog).findByRole("option", { name: /Belém — PA/ }));
   await user.click(within(dialog).getByRole("button", { name: /Salvar busca/ }));
+  transport.mockRestore();
   expect(repository.load()?.searches).toHaveLength(2);
+  expect(repository.load()?.searches[0].municipality?.ibgeCode).toBe("1501402");
   await user.click(screen.getByRole("button", { name: "Fechar aba Farmácia" }));
   expect(repository.load()?.searches).toHaveLength(2);
   await user.click(screen.getByRole("button", { name: "Buscas salvas" }));
