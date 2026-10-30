@@ -34,7 +34,8 @@ test("favorite, comment, override, hide and restore remain functional across rem
   const user = userEvent.setup();
   const view = render(<App repository={repository} />);
   await user.click(screen.getByRole("button", { name: "Ver detalhes de Clínica Exemplo Centro" }));
-  let dialog = screen.getByRole("dialog");
+  let dialog = screen.getByRole("region", { name: "Detalhes de Clínica Exemplo Centro" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   await user.click(within(dialog).getByRole("button", { name: "Adicionar aos favoritos" }));
   await user.type(within(dialog).getByRole("textbox", { name: "Novo comentário" }), "<b>Comentário sintético</b>");
   await user.click(within(dialog).getByRole("button", { name: "Adicionar" }));
@@ -47,7 +48,7 @@ test("favorite, comment, override, hide and restore remain functional across rem
   view.unmount();
   render(<App repository={repository} />);
   await user.click(screen.getByRole("button", { name: "Ver detalhes de Clínica Exemplo Centro" }));
-  dialog = screen.getByRole("dialog");
+  dialog = screen.getByRole("region", { name: "Detalhes de Clínica Exemplo Centro" });
   expect(within(dialog).getByText("0000")).toBeInTheDocument();
   expect(within(dialog).getByText("<b>Comentário sintético</b>")).toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Remover dos favoritos" })).toHaveAttribute("aria-pressed", "true");
@@ -56,7 +57,7 @@ test("favorite, comment, override, hide and restore remain functional across rem
   expect(screen.queryByRole("button", { name: "Ver detalhes de Clínica Exemplo Centro" })).not.toBeInTheDocument();
   await user.selectOptions(screen.getByRole("combobox", { name: "Visibilidade" }), "hidden");
   await user.click(screen.getByRole("button", { name: "Ver detalhes de Clínica Exemplo Centro" }));
-  await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Restaurar nesta busca" }));
+  await user.click(within(screen.getByRole("region", { name: "Detalhes de Clínica Exemplo Centro" })).getByRole("button", { name: "Restaurar nesta busca" }));
   expect(repository.load()?.searches[0].hiddenIds).toEqual([]);
 });
 
@@ -139,7 +140,7 @@ test("storage failure retains drafts, rolls back changes and retries without dup
   const user = userEvent.setup();
   render(<App repository={repository} />);
   await user.click(screen.getByRole("button", { name: "Ver detalhes de Clínica Exemplo Centro" }));
-  const dialog = screen.getByRole("dialog");
+  const dialog = screen.getByRole("region", { name: "Detalhes de Clínica Exemplo Centro" });
   const save = vi.spyOn(repository, "save").mockImplementation(() => { throw new Error("quota exceeded"); });
   const input = within(dialog).getByRole("textbox", { name: "Novo comentário" });
   await user.type(input, "Preservar rascunho");

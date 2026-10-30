@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Place } from "../../domain/types";
 
 interface MapMarker {
@@ -13,22 +13,18 @@ interface Props {
   onSelect: (id: string) => void;
 }
 
-declare global {
-  interface Window {
-    L: typeof import("leaflet");
-  }
-}
-
 export function MapView({ markers, onSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<import("leaflet").Map | null>(null);
+  const [instance, setInstance] = useState<{ map: import("leaflet").Map; L: typeof import("leaflet") } | null>(null);
   const markersRef = useRef<Map<string, import("leaflet").Marker>>(new Map());
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!containerRef.current) return;
     let cancelled = false;
+    let activeMap: import("leaflet").Map | undefined;
+    const leafletMarkers = markersRef.current;
 
     async function init() {
       const L = (await import("leaflet")).default;
@@ -47,21 +43,18 @@ export function MapView({ markers, onSelect }: Props) {
         attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
         maxZoom: 19
       }).addTo(map);
-      mapRef.current = map;
-      window.L = L;
+      activeMap = map;
+      setInstance({ map, L });
     }
 
     init();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; activeMap?.remove(); leafletMarkers.clear(); };
   }, []);
 
-  // Sincronizar marcadores quando markers muda
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    const L = window.L;
-    if (!L) return;
+    if (!instance) return;
+    const { map, L } = instance;
+    let boundsChanged = false;
 
     const currentIds = new Set(markers.map((m) => m.id));
 
@@ -70,6 +63,7 @@ export function MapView({ markers, onSelect }: Props) {
       if (!currentIds.has(id)) {
         marker.remove();
         markersRef.current.delete(id);
+        boundsChanged = true;
       }
     }
 
@@ -81,30 +75,30 @@ export function MapView({ markers, onSelect }: Props) {
       const lng = m.place.longitude!;
       let marker = markersRef.current.get(m.id);
       if (!marker) {
-        marker = L.marker([lat, lng])
+        marker = L.marker([lat, lng], { title: m.place.name, alt: m.place.name })
           .addTo(map)
           .on("click", () => onSelectRef.current(m.id));
         markersRef.current.set(m.id, marker);
+        boundsChanged = true;
+      } else {
+        const previous = marker.getLatLng();
+        if (previous.lat !== lat || previous.lng !== lng) {
+          marker.setLatLng([lat, lng]);
+          boundsChanged = true;
+        }
       }
       const opacity = m.selected ? 1 : 0.7;
       marker.setOpacity(opacity);
-      marker.bindPopup(`<strong>${m.place.name}</strong><br/>${m.place.address}`);
+      marker.setZIndexOffset(m.selected ? 1000 : 0);
+      marker.getElement()?.setAttribute("aria-pressed", String(m.selected));
     }
 
     // Ajustar viewport para cobrir todos os marcadores
-    if (validMarkers.length > 0) {
+    if (boundsChanged && validMarkers.length > 0) {
       const bounds = L.latLngBounds(validMarkers.map((m) => [m.place.latitude!, m.place.longitude!]));
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
     }
-  }, [markers]);
-
-  // Abrir popup do marcador selecionado
-  useEffect(() => {
-    const selected = markers.find((m) => m.selected);
-    if (!selected) return;
-    const marker = markersRef.current.get(selected.id);
-    if (marker) marker.openPopup();
-  }, [markers]);
+  }, [markers, instance]);
 
   return <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 360 }} aria-label="Mapa de estabelecimentos" />;
 }

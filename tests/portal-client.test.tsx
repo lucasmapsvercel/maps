@@ -45,7 +45,7 @@ test("remote save failure preserves drafts and confirmed state", async () => {
   vi.stubGlobal("fetch", fetch);
   render(<PortalClient />);
   await user.click(await screen.findByRole("button", { name: "Ver detalhes de Clínica Exemplo Centro" }));
-  const dialog = screen.getByRole("dialog");
+  const dialog = screen.getByRole("region", { name: "Detalhes de Clínica Exemplo Centro" });
   await user.type(within(dialog).getByRole("textbox", { name: "Novo comentário" }), "Rascunho mantido");
   await user.click(within(dialog).getByRole("button", { name: "Adicionar" }));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent("Alteração concorrente");

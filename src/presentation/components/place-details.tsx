@@ -1,12 +1,12 @@
 import { useState } from "react";
 import type { Portal } from "../use-portal";
-import { Modal, Notice } from "./common";
+import { Notice } from "./common";
 
 function formatDate(value: string) {
   return Number.isNaN(Date.parse(value)) ? "sem data" : new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium" }).format(new Date(value));
 }
 
-export function PlaceDialog({ portal, id, onClose }: { portal: Portal; id: string; onClose: () => void }) {
+export function PlaceDetails({ portal, id, onClose }: { portal: Portal; id: string; onClose: () => void }) {
   const { state, service, mutate } = portal;
   const place = service.getPlace(id);
   const search = service.searchForPlace(id);
@@ -16,7 +16,7 @@ export function PlaceDialog({ portal, id, onClose }: { portal: Portal; id: strin
   const [phone, setPhone] = useState(place.phone || "");
   const [website, setWebsite] = useState(place.website || "");
   const [comment, setComment] = useState("");
-  return <Modal title={`Detalhes de ${place.name}`} onClose={onClose} detail>
+  return <section className="panel place-details" aria-label={`Detalhes de ${place.name}`}>
     <div className="detail-header"><div><span className="eyebrow">DETALHE DO REGISTRO</span><h2 className="detail-title">{place.name}</h2><p className="detail-address">{place.address}</p></div>
       <div className="detail-actions"><button className={`mini-action${favorite ? " is-favorite" : ""}`} aria-label={favorite ? "Remover dos favoritos" : "Adicionar aos favoritos"}
         aria-pressed={favorite} disabled={portal.pending > 0} onClick={() => mutate({ type: "toggleFavorite", id })}>☆</button>
@@ -53,5 +53,5 @@ export function PlaceDialog({ portal, id, onClose }: { portal: Portal; id: strin
     </form>
     <p className="footer-note">{portal.remote ? "Dados internos do workspace. Não inclua dados pessoais sensíveis nos comentários." : "Dados de exemplo, sem localização ou informações comerciais reais."}</p>
     <Notice notice={portal.notice} />
-  </Modal>;
+  </section>;
 }

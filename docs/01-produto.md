@@ -63,6 +63,16 @@ Area principal com mapa e tabela. No desktop, exibicao lado a lado; no celular, 
 
 Detalhe do estabelecimento: nome, endereco, coordenadas, telefone, site, categoria, situacao comercial, nota e quantidade de avaliacoes, quando fornecidos e permitidos. Ausencia deve aparecer como indisponivel, nunca como dado inventado. Comentarios internos nao sao avaliacoes publicadas no Google.
 
+A selecao de um marcador destaca o mesmo estabelecimento na listagem e
+rola apenas a lista para revelar o item, se necessario. Selecionar pela
+lista tambem destaca o marcador, sem redefinir o enquadramento do mapa.
+Os detalhes aparecem em um painel no fluxo da pagina, abaixo do conjunto
+mapa/lista (ou abaixo da lista de favoritos), sem modal nem popup sobre o
+mapa. O painel permite favoritar, editar, comentar e ocultar/restaurar como
+antes; fechar limpa a selecao. Outras paginas e buscas nao exibem detalhes
+que pertencem ao contexto anterior. No celular, o painel fica abaixo da
+visualizacao ativa e nao bloqueia os controles.
+
 Acoes: favorito, editar dados locais, comentar, ocultar/restaurar nesta busca e abrir no Google Maps. O link externo nao e necessario para consultar o registro salvo.
 
 Filtros de visibilidade: `Visiveis` por padrao, `Ocultos` e `Todos`. Um resultado oculto nao aparece no mapa nem na tabela padrao; restaurar recupera sua exibicao. Favoritar um resultado oculto nao o restaura automaticamente.
