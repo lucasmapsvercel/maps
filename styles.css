@@ -282,6 +282,25 @@ button:disabled {
   margin: 12px 0;
 }
 
+/* Coleta de estabelecimentos */
+.quota-panel { background: var(--canvas); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; display: grid; gap: 8px; }
+.quota-row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.quota-label { font-size: 11px; color: var(--muted); }
+.quota-numbers { font-size: 11px; color: var(--ink); text-align: right; }
+.quota-bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.quota-bar-fill { height: 100%; background: var(--green); border-radius: 99px; transition: width 0.4s; }
+.quota-detail { font-size: 10px; color: var(--muted); margin: 0; line-height: 1.5; }
+.quota-warning { color: var(--red); font-weight: 600; }
+.quota-error, .quota-loading { font-size: 10px; color: var(--muted); margin: 0; }
+.quota-error { color: var(--red); }
+.collection-status { margin-top: 14px; }
+.collection-badge { display: inline-block; border-radius: 6px; padding: 6px 10px; font-size: 11px; line-height: 1.4; }
+.badge-pending { background: #f0eedf; color: #7a6e2b; }
+.badge-running { background: #e8f0fd; color: #2b4fa0; }
+.badge-done { background: var(--green-soft); color: var(--green-dark); }
+.badge-failed { background: #fdecea; color: var(--red); }
+.collection-error { font-size: 11px; color: var(--red); margin: 8px 0 0; }
+
 /* Mapa Leaflet */
 .map-panel { display: flex; flex-direction: column; }
 .map-panel .panel-heading { flex: 0 0 auto; }

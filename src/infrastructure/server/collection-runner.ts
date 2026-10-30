@@ -88,10 +88,18 @@ export async function getQuotaUsage(billingScope: string, db: Db, now = new Date
     timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit"
   }).format(now);
   const id = createHash("sha256").update(`${billingScope}:${month}`).digest("hex");
-  const budget = await db.collection<{ _id: string; count: number }>("googleSearchBudgets").findOne({ _id: id });
+  const [budget, config] = await Promise.all([
+    db.collection<{ _id: string; count: number }>("googleSearchBudgets").findOne({ _id: id }),
+    loadCollectionConfig(db)
+  ]);
   const limit = Number(process.env.GOOGLE_PLACES_MONTHLY_LIMIT) || 0;
   const used = budget?.count ?? 0;
-  return { used, limit, remaining: Math.max(0, limit - used), month };
+  const callsPerSearch = Math.ceil(config.maxResultsPerSearch / 20);
+  return {
+    used, limit, remaining: Math.max(0, limit - used), month,
+    maxResultsPerSearch: config.maxResultsPerSearch,
+    callsPerSearch
+  };
 }
 
 async function importPage(
