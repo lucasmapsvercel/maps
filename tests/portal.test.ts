@@ -29,6 +29,26 @@ test("creating and closing a search preserves existing searches and persists acr
   expect(repository.load()).toEqual(service.state);
 });
 
+test("deleting a saved search closes its tab and preserves places, favorites and annotations", () => {
+  const { service, repository } = fixture();
+  service.toggleFavorite("demo-01");
+  service.addComment("demo-01", "Preservar comentário");
+  service.editPlace("demo-01", { phone: "0000" });
+  service.addSearch("Outra busca", "Belém");
+  const { places, favorites, comments, overrides } = structuredClone(service.state);
+  service.execute({ type: "deleteSearch", id: "search-test" });
+  expect(service.state.activeSearchId).toBe("search-demo");
+  expect(service.state.openTabs).toEqual(["search-demo"]);
+  service.execute({ type: "deleteSearch", id: "search-demo" });
+  expect(service.state.activeSearchId).toBeNull();
+  expect(service.state.openTabs).toEqual([]);
+  expect(service.state.searches).toEqual([]);
+  expect(service.state).toMatchObject({ places, favorites, comments, overrides });
+  service.save();
+  expect(repository.load()).toEqual(service.state);
+  expect(() => service.deleteSearch("missing")).toThrow("Busca não encontrada");
+});
+
 test("search validation rejects empty city and terms outside 2..200 characters without mutation", () => {
   const { service } = fixture();
   for (const [term, city] of [["a", "Belém"], ["a".repeat(201), "Belém"], ["Clínica", " "]]) {

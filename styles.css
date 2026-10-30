@@ -318,6 +318,7 @@ button:disabled {
 .google-log-table th, .google-log-table td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .google-log-table th { white-space: nowrap; }
 .google-log-table td { min-width: 100px; overflow-wrap: anywhere; }
+.google-log-json { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; }
 
 /* Mapa Leaflet */
 .map-panel { display: flex; flex-direction: column; }

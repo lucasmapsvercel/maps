@@ -23,6 +23,7 @@ const importedPlace = z.strictObject({
 export const portalCommandSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("addSearch"), term: z.string().trim().min(2).max(200), city: z.string().trim().min(1).max(200) }),
   z.strictObject({ type: z.literal("openSearch"), id }),
+  z.strictObject({ type: z.literal("deleteSearch"), id }),
   z.strictObject({ type: z.literal("closeTab"), id }),
   z.strictObject({ type: z.literal("navigate"), page: z.enum(["dashboard", "saved", "favorites", "settings"]) }),
   z.strictObject({ type: z.literal("toggleFavorite"), id }),

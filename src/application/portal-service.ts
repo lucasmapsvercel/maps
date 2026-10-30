@@ -30,6 +30,7 @@ export class PortalService {
     switch (command.type) {
       case "addSearch": return this.addSearch(command.term, command.city);
       case "openSearch": return this.openSearch(command.id);
+      case "deleteSearch": return this.deleteSearch(command.id);
       case "closeTab": return this.closeTab(command.id);
       case "navigate": return this.navigate(command.page);
       case "toggleFavorite": return this.toggleFavorite(command.id);
@@ -92,6 +93,12 @@ export class PortalService {
     if (this.state.activeSearchId === id) {
       this.state.activeSearchId = this.state.openTabs.at(-1) || null;
     }
+  }
+
+  deleteSearch(id: string) {
+    if (!this.state.searches.some((search) => search.id === id)) throw new ValidationError("Busca não encontrada.");
+    this.state.searches = this.state.searches.filter((search) => search.id !== id);
+    this.closeTab(id);
   }
 
   navigate(page: Page) {

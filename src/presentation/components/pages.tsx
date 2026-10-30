@@ -1,15 +1,44 @@
+import { useState } from "react";
 import type { Portal } from "../use-portal";
-import { EmptyState } from "./common";
+import { EmptyState, Modal, Notice } from "./common";
+import type { SavedSearch } from "../../domain/types";
 import { PlaceList } from "./place-list";
 import { CollectionSettings } from "./collection-settings";
 import { GoogleSearchLogs } from "./google-search-logs";
 
 export function SavedSearches({ portal }: { portal: Portal }) {
-  return <div className="saved-list">{portal.state.searches.length ? portal.state.searches.map((search) =>
+  const [deleting, setDeleting] = useState<SavedSearch | null>(null);
+  const [busy, setBusy] = useState(false);
+  return <><div className="saved-list">{portal.state.searches.length ? portal.state.searches.map((search) =>
     <article className="saved-item" key={search.id}><span className="saved-symbol" aria-hidden="true">⌕</span>
-      <span className="saved-copy"><strong>{search.term}</strong><small>{search.city} · {search.demo ? `${search.placeIds.length} resultados demonstrativos` : "resultados Google não armazenados"}</small></span>
+      <span className="saved-copy"><strong>{search.term}</strong><small>{search.city} · {search.placeIds.length} {search.demo ? "resultados demonstrativos" : "resultados salvos"}</small></span>
       <button className="button button-quiet button-small" onClick={() => portal.mutate({ type: "openSearch", id: search.id })}>Abrir busca →</button>
-    </article>) : <EmptyState title="Ainda não há buscas salvas">Crie sua primeira pesquisa.</EmptyState>}</div>;
+      <button className="button button-quiet button-small" aria-label={`Excluir busca ${search.term}`} disabled={portal.pending > 0} onClick={() => setDeleting(search)}>Excluir</button>
+    </article>) : <EmptyState title="Ainda não há buscas salvas">Crie sua primeira pesquisa.</EmptyState>}</div>
+    {deleting && <Modal title="Excluir busca salva" onClose={() => { if (!busy) setDeleting(null); }}>
+      <form onSubmit={async (event) => {
+        event.preventDefault();
+        if (busy) return;
+        setBusy(true);
+        try {
+          if (await portal.mutate({ type: "deleteSearch", id: deleting.id }, "Busca excluída. Estabelecimentos e anotações foram preservados.")) setDeleting(null);
+        } finally {
+          setBusy(false);
+        }
+      }}>
+        <h2>Excluir busca salva</h2>
+        <p>Excluir a busca <strong>{deleting.term}</strong> em {deleting.city}?</p>
+        <p>A busca e suas abas serão removidas para todos do workspace. Estabelecimentos, favoritos,
+          comentários, ajustes, histórico de consultas e consumo da cota serão preservados.
+          Esta ação não pode ser desfeita.</p>
+        <Notice notice={portal.notice} />
+        <div className="modal-actions">
+          <button type="button" className="button button-quiet" disabled={busy} onClick={() => setDeleting(null)}>Cancelar</button>
+          <button type="submit" className="button button-primary" disabled={busy || portal.pending > 0}>{busy ? "Excluindo…" : "Confirmar exclusão"}</button>
+        </div>
+      </form>
+    </Modal>}
+  </>;
 }
 
 export function Favorites({ portal, onSelect, selectedId }: {

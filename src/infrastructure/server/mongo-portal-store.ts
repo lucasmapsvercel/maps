@@ -73,8 +73,18 @@ export class MongoPortalStore {
           if (receipt.fingerprint !== fingerprint) throw new PortalError(409, "IDEMPOTENCY_CONFLICT", "Identificador de operação já usado com outro conteúdo.");
           return snapshot(workspace, view?.data);
         }
-        if (workspace.version !== version) {
+        const viewCommand = isViewCommand(command);
+        if (!viewCommand && workspace.version !== version) {
           throw new PortalError(409, "VERSION_CONFLICT", "Os dados foram alterados em outra aba ou sessão. Recarregue o portal antes de tentar novamente.");
+        }
+        if (command.type === "deleteSearch") {
+          const running = await this.db.collection("collectionJobs").findOne({
+            workspaceId: actor.workspaceId, searchId: command.id, status: { $in: ["pending", "running"] }
+          }, { session });
+          if (running) throw new PortalError(409, "COLLECTION_ALREADY_RUNNING", "Aguarde a coleta em andamento terminar antes de excluir esta busca.");
+          await this.db.collection("collectionCursors").deleteMany({
+            workspaceId: actor.workspaceId, searchId: command.id
+          }, { session });
         }
         const current = snapshot(workspace, view?.data);
         const service = new PortalService({ state: current.state, createId: randomUUID });
@@ -95,14 +105,26 @@ export class MongoPortalStore {
         if (Buffer.byteLength(JSON.stringify(next.data)) > 8 * 1024 * 1024) {
           throw new PortalError(413, "WORKSPACE_LIMIT", "O workspace atingiu o limite desta versão. Exporte os dados e solicite ampliação.");
         }
-        const updated = await workspaces.updateOne({ _id: actor.workspaceId, version }, {
-          $set: { data: next.data, updatedAt: new Date() }, $inc: { version: 1 }
-        }, { session });
-        if (updated.modifiedCount !== 1) throw new PortalError(409, "VERSION_CONFLICT", "Alteração concorrente. Recarregue o portal.");
-        await views.updateOne({ workspaceId: actor.workspaceId, userId: actor.userId }, {
-          $set: { data: next.view },
-          $setOnInsert: { _id: randomUUID(), workspaceId: actor.workspaceId, userId: actor.userId }
-        }, { upsert: true, session });
+        if (!viewCommand) {
+          const updated = await workspaces.updateOne({ _id: actor.workspaceId, version }, {
+            $set: { data: next.data, updatedAt: new Date() }, $inc: { version: 1 }
+          }, { session });
+          if (updated.modifiedCount !== 1) throw new PortalError(409, "VERSION_CONFLICT", "Alteração concorrente. Recarregue o portal.");
+        }
+        if (command.type !== "importPlaces") {
+          await views.updateOne({ workspaceId: actor.workspaceId, userId: actor.userId }, {
+            $set: { data: next.view },
+            $setOnInsert: { _id: randomUUID(), workspaceId: actor.workspaceId, userId: actor.userId }
+          }, { upsert: true, session });
+        }
+        if (command.type === "deleteSearch") {
+          await views.updateMany({ workspaceId: actor.workspaceId }, {
+            $pull: { "data.openTabs": command.id }
+          }, { session });
+          await views.updateMany({ workspaceId: actor.workspaceId, "data.activeSearchId": command.id }, [
+            { $set: { "data.activeSearchId": { $ifNull: [{ $arrayElemAt: ["$data.openTabs", -1] }, null] } } }
+          ], { session });
+        }
         await receipts.insertOne({
           workspaceId: actor.workspaceId, userId: actor.userId, commandId, fingerprint,
           expiresAt: new Date(Date.now() + 7 * 86400_000)
@@ -114,7 +136,7 @@ export class MongoPortalStore {
             version: version + 1, createdAt: new Date()
           }, { session });
         }
-        return { version: version + 1, state: service.state };
+        return { version: viewCommand ? workspace.version : version + 1, state: service.state };
       }, { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" } });
       if (!result) throw new Error("Transação não concluída.");
       return result;

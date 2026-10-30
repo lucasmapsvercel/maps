@@ -160,8 +160,10 @@ Nao usar consultas repetidas para varredura sistematica ou formar um diretorio.
 
 Nao assumimos direito de armazenar todos os campos por um prazo generico.
 A coleta atual grava IDs e dados retornados no workspace e no buffer de
-retomada. Isso exige revisao de conformidade antes da ativacao. Os recibos,
-auditoria e logs nao incluem nomes/enderecos/coordenadas dos estabelecimentos.
+retomada. Os detalhes dos logs tambem incluem a resposta sanitizada por 30 dias,
+conforme configuracao de produto solicitada. Esse prazo nao concede permissao
+contratual de retencao: revisar conformidade antes da ativacao. Os recibos e a
+auditoria permanente nao incluem nomes/enderecos/coordenadas dos estabelecimentos.
 Garanta tambem que observabilidade externa nao capture corpos de resposta.
 
 ## Endpoint e consumo
@@ -189,7 +191,7 @@ capacidade no MongoDB em transacao:
 Mesmo timeout, erro do Google ou queda depois da reserva permanece contabilizado.
 Nao ha reembolso de tentativa nem retry automatico: pode haver cobranca de
 chamada em voo. Repetir UUID nao chama o Google novamente; retorna 409, pois
-a resposta nao esta armazenada. Nova consulta exige nova confirmacao e UUID.
+nao ha replay da resposta pelo endpoint de coleta. Nova consulta exige nova confirmacao e UUID.
 Os recibos/contadores sao pequenos metadados persistentes sem TTL nesta etapa;
 nao os apague durante a janela em que protegem a alocacao e a idempotencia.
 
@@ -209,13 +211,45 @@ nao a quantidade importada ou deduplicada.
 
 O registro inicial e gravado na mesma transacao da reserva, antes de chamar
 o provedor. Sucesso e falha atualizam o registro com duracao em milissegundos;
-erros registram somente o codigo, nunca o corpo da resposta do Google.
+os recibos permanentes registram somente o codigo de erro e metadados.
 Se o processo terminar ou a gravacao final falhar, o registro fica **Sem
 conclusao registrada**, sem indicar sucesso. Reservas recusadas por limite
 ou UUID repetido nao geram novos logs, pois nao realizam chamadas.
 Os registros nao comprovam recebimento ou cobranca do lado Google e nao tem
 TTL, preservando a protecao de idempotencia dos recibos existentes.
 Execute a migracao padrao para criar o indice de workspace/data do historico.
+
+#### Request e response
+
+Cada linha oferece **Request / response**, carregado sob demanda pelo endpoint
+`GET /api/v1/collection/logs/:logId`. A leitura exige sessao, isola o workspace,
+usa `no-store` e nao chama o Google nem consome cota. Consultas anteriores a
+esta funcionalidade nao possuem detalhes retroativos.
+
+`googleSearchDetails` guarda separadamente, por 30 dias a partir da chamada:
+
+- Request: metodo, URL, Content-Type, mascara de campos e corpo enviado
+  (`textQuery`, idioma, regiao, pageSize e indicador sanitizado de token).
+- Response: status HTTP real do Google (nao o status traduzido pelo portal),
+  Content-Type e corpo JSON original sanitizado, incluindo estabelecimentos
+  e erros. Respostas nao JSON sao exibidas como texto, nunca como HTML.
+- Chave da API, tokens de paginacao, autorizacao, cookies e campos de
+  credenciais sao substituidos por `[REDACTED]`. Somente headers permitidos
+  sao capturados; headers arbitrarios de resposta nao sao armazenados.
+- Falhas de conexao registram ausencia de resposta HTTP, sem detalhes
+  internos do transporte. Request sem response indica chamada em andamento
+  ou interrompida. Corpo acima de 1 MiB e truncado explicitamente apos
+  sanitizacao (preview de ate 100.000 caracteres).
+
+O request e persistido antes do envio; response e capturado antes de validar
+o formato ou tratar erros HTTP. Falhas ao gravar detalhes sao propagadas,
+sem apresentar sucesso ficticio. Os corpos nunca sao enviados ao console.
+
+Execute `npm.cmd run db:migrate` para criar o indice TTL de `expiresAt`.
+Mongo remove documentos expirados assincronamente; o endpoint tambem aplica
+`expiresAt > agora`, bloqueando imediatamente a leitura apos 30 dias.
+Recibos, contadores e metadados continuam preservados sem esse TTL.
+Backups devem seguir a mesma politica de retencao dos detalhes.
 
 Codigos: `COLLECTION_DISABLED`, `COLLECTION_NOT_CONFIGURED`,
 `COLLECTION_BUDGET_REQUIRED`, `COLLECTION_CONFIGURATION_INVALID`,

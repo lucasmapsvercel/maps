@@ -14,12 +14,22 @@ coleta real, ainda nao implementado. A interface atual funciona com:
 | `GET /api/health` | Liveness sem banco |
 | `GET /api/ready` | Configuracao, ping Mongo e marcador de migracao |
 
-Comandos: `addSearch`, `openSearch`, `closeTab`, `navigate`, `setFilter`,
+Comandos: `addSearch`, `deleteSearch`, `openSearch`, `closeTab`, `navigate`, `setFilter`,
 `toggleFavorite`, `toggleHidden`, `addComment`, `editPlace`, `clearOverrides`.
 Schemas estritos em `src/domain/portal-command.ts`. Comando recebe somente
 campos permitidos; IDs, data e autor novos sao definidos pelo servidor.
 As respostas do portal sao `{ state, version }`; erros possuem `error`, `code`
 e identificador de requisicao. Todas as leituras sao locais, sem coleta.
+
+`deleteSearch` recebe `{ type: "deleteSearch", id: "<id da busca>" }` pelo
+endpoint de comandos do portal. A tela Buscas salvas exige confirmacao.
+A exclusao remove a busca compartilhada, suas abas em todas as views do
+workspace e o cursor de continuacao. Estabelecimentos, favoritos, comentarios,
+ajustes, jobs anteriores, logs e consumo de cota sao preservados.
+Se a busca excluida era ativa, a ultima aba restante e selecionada (ou null).
+A exclusao e auditada, transacional, idempotente por commandId e bloqueada
+enquanto houver coleta pendente/em andamento. IDs de outro workspace nao
+podem ser excluidos, e uma busca excluida nao pode iniciar nova coleta.
 
 Colecoes atuais: `portalWorkspaces` (agregado comercial de ate 8 MiB e versao),
 `portalViews` (workspace/usuario, indice unico), `memberships` (vinculos de
@@ -29,8 +39,13 @@ Workspace e usuario vem da sessao/configuracao, nunca do corpo.
 O agregado usa IDs string UUID e datas ISO internas; metadados Mongo usam Date.
 As convencoes ObjectId/BSON das proximas secoes sao o alvo normalizado.
 
-Cada comando usa transacao com versao esperada, alteracoes comerciais e view,
-auditoria e recibo. Conflitos retornam 409 sem sobrescrever dados. Repetir
+Comandos comerciais usam transacao com versao esperada, alteracoes comerciais,
+auditoria e recibo. Navegacao, abas e filtros alteram somente a view individual,
+sem exigir nem incrementar a versao comercial; assim, a coleta em andamento
+nao impede trocar de pagina. Importacoes de resultados nao escrevem a view.
+Atualizacoes automaticas preservam pagina, abas e filtros atuais, reconciliando
+IDs de buscas excluidas, e sao serializadas com os comandos do cliente.
+Conflitos comerciais retornam 409 sem sobrescrever dados. Repetir
 UUID/conteudo devolve estado atual sem repetir a alteracao; UUID com outro
 conteudo retorna 409. Corpos acima de 8 KiB sao rejeitados.
 Nao estao implementados paginacao, geoconsultas ou coleta dos contratos abaixo.

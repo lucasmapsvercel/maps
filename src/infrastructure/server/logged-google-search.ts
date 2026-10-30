@@ -5,6 +5,13 @@ import type { GoogleSearchResult } from "../../domain/google-search";
 import type { GoogleSearchLog } from "../../domain/google-search-log";
 import type { Actor } from "./auth";
 import { GoogleSearchBudget, type GoogleSearchRequest } from "./google-search-budget";
+import type { GoogleSearchDetails } from "../../domain/google-search-details";
+
+export interface GoogleSearchDetailsDocument extends GoogleSearchDetails {
+  _id: string;
+  workspaceId: string;
+  expiresAt: Date;
+}
 
 interface SearchRequest {
   requestId: string;
@@ -34,9 +41,16 @@ export class LoggedGoogleSearch {
     );
     const receipts = this.db.collection<GoogleSearchRequest>("googleSearchRequests");
     const started = performance.now();
+    const expiresAt = new Date(Date.now() + 30 * 86400_000);
     let result: GoogleSearchResult;
     try {
-      result = await this.provider.search(request.term, request.city, request.pageToken);
+      result = await this.provider.search(request.term, request.city, request.pageToken, async (details) => {
+        await this.db.collection<GoogleSearchDetailsDocument>("googleSearchDetails").updateOne(
+          { _id: id, workspaceId: actor.workspaceId },
+          { $set: { ...details, expiresAt }, $setOnInsert: { workspaceId: actor.workspaceId } },
+          { upsert: true }
+        );
+      });
     } catch (error) {
       await receipts.updateOne({ _id: id, workspaceId: actor.workspaceId }, { $set: {
         status: "failed", durationMs: Math.round(performance.now() - started),

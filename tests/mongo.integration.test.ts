@@ -18,6 +18,9 @@ import { GoogleSearchBudget } from "../src/infrastructure/server/google-search-b
 import { LoggedGoogleSearch } from "../src/infrastructure/server/logged-google-search";
 import { PortalError } from "../src/application/portal-error";
 import { GET as getLogs } from "../src/app/api/v1/collection/logs/route";
+import { GET as getLogDetails } from "../src/app/api/v1/collection/logs/[logId]/route";
+import { GoogleTextSearchProvider } from "../src/infrastructure/server/google-places-provider";
+import type { GoogleSearchDetailsDocument } from "../src/infrastructure/server/logged-google-search";
 import { startCollectionJob, getCollectionJob, getQuotaUsage } from "../src/infrastructure/server/collection-runner";
 import { GET as getCollectionConfig, PUT as putCollectionConfig } from "../src/app/api/v1/collection/config/route";
 
@@ -191,7 +194,7 @@ test("the 5000th allocated request is allowed but the 5001st cannot be reserved"
   expect((await db.collection<{ _id: string; count: number }>("googleSearchBudgets").findOne({ _id: id }))?.count).toBe(5000);
 });
 
-test("collection endpoint resolves the saved search securely, calls Google once and persists no returned content", async () => {
+test("collection endpoint resolves the saved search securely, calls Google once and keeps returned content out of permanent receipts", async () => {
   vi.stubEnv("MONGODB_URI", server.getUri());
   vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
   vi.stubEnv("NEXTAUTH_URL", "http://localhost:3000");
@@ -505,4 +508,139 @@ test("a smaller remaining monthly quota blocks further calls without charging th
   expect(await waitForJob(id, actor.workspaceId)).toMatchObject({ status: "failed", requestsMade: 2, collectedSoFar: 2 });
   expect(transport).toHaveBeenCalledTimes(2);
   expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 2, remaining: 0 });
+});
+
+test("deleting a search persists across users, cleans all tabs and cursor, preserves annotations and audit history", async () => {
+  const actor = { ...alice, workspaceId: "delete-search" };
+  const colleague = { ...actor, userId: bob.userId };
+  let current = await store.load(actor);
+  current = await store.execute(actor, { type: "addSearch", term: "Preservada", city: "Belém" }, current.version);
+  const remainingId = current.state.searches[0].id;
+  current = await store.execute(actor, { type: "addSearch", term: "Excluir", city: "Belém" }, current.version);
+  const id = current.state.searches[0].id;
+  current = await store.execute(actor, {
+    type: "importPlaces", searchId: id, places: [{ id: "kept-place", name: "Mantido", address: "Rua", category: "" }]
+  }, current.version);
+  current = await store.execute(actor, { type: "toggleFavorite", id: "kept-place" }, current.version);
+  current = await store.execute(actor, { type: "addComment", id: "kept-place", text: "Manter anotação" }, current.version);
+  current = await store.execute(actor, { type: "editPlace", id: "kept-place", phone: "0000", website: "" }, current.version);
+  await store.load(colleague);
+  current = await store.execute(colleague, { type: "openSearch", id: remainingId }, current.version);
+  current = await store.execute(colleague, { type: "openSearch", id }, current.version);
+  await db.collection("collectionCursors").insertOne({ workspaceId: actor.workspaceId, searchId: id, buffer: [{ id: "unused" }] });
+  const otherWorkspace = { ...actor, workspaceId: "delete-search-outsider" };
+  const foreign = await store.load(otherWorkspace);
+  await expect(store.execute(otherWorkspace, { type: "deleteSearch", id }, foreign.version)).rejects.toMatchObject({ status: 422 });
+  const commandId = randomUUID();
+  const deleted = await store.execute(actor, { type: "deleteSearch", id }, current.version, commandId);
+  expect(deleted.state.searches.map((search) => search.id)).toEqual([remainingId]);
+  expect(deleted.state.openTabs).toEqual([remainingId]);
+  expect(deleted.state.activeSearchId).toBe(remainingId);
+  expect(deleted.state.places).toEqual(current.state.places);
+  expect(deleted.state.favorites).toEqual(["kept-place"]);
+  expect(deleted.state.comments).toEqual(current.state.comments);
+  expect(deleted.state.overrides).toEqual(current.state.overrides);
+  expect((await store.load(colleague)).state).toMatchObject({ activeSearchId: remainingId, openTabs: [remainingId] });
+  expect(await db.collection("collectionCursors").countDocuments({ workspaceId: actor.workspaceId, searchId: id })).toBe(0);
+  expect(await store.execute(actor, { type: "deleteSearch", id }, current.version, commandId)).toEqual(deleted);
+  expect(await db.collection("auditEvents").countDocuments({ workspaceId: actor.workspaceId, action: "deleteSearch", entityId: id })).toBe(1);
+  await expect(startCollectionJob(actor, id, "Excluir", "Belém", "fixture", randomUUID(), client, db)).rejects.toMatchObject({ code: "SEARCH_NOT_FOUND" });
+  const last = await store.execute(actor, { type: "deleteSearch", id: remainingId }, deleted.version);
+  expect(last.state.activeSearchId).toBeNull();
+  expect((await store.load(colleague)).state).toMatchObject({ searches: [], activeSearchId: null, openTabs: [] });
+});
+
+test("deletion cannot race a running collection and preserves its monthly usage and logs after completion", async () => {
+  vi.stubEnv("GOOGLE_PLACES_MONTHLY_LIMIT", "20");
+  await setRequestLimit(1);
+  const actor = { ...alice, workspaceId: "delete-running-search" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Em coleta", city: "Belém" }, initial.version);
+  const search = saved.state.searches[0];
+  let release!: (response: Response) => void;
+  const transport = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+  const scope = randomUUID();
+  const id = await startCollectionJob(actor, search.id, search.term, search.city, "fixture", scope, client, db);
+  await vi.waitFor(() => expect(transport).toHaveBeenCalledTimes(1));
+  await expect(store.execute(actor, { type: "deleteSearch", id: search.id }, saved.version)).rejects.toMatchObject({ code: "COLLECTION_ALREADY_RUNNING" });
+  release(Response.json({ places: [] }));
+  await waitForJob(id, actor.workspaceId);
+  const current = await store.load(actor);
+  await store.execute(actor, { type: "deleteSearch", id: search.id }, current.version);
+  expect(await getQuotaUsage(scope, db)).toMatchObject({ used: 1 });
+  expect(await db.collection("googleSearchRequests").countDocuments({ workspaceId: actor.workspaceId, searchId: search.id })).toBe(1);
+  expect(await getCollectionJob(id, actor.workspaceId, db)).toMatchObject({ status: "done" });
+});
+
+test("navigation and filters accept stale commercial versions while imports preserve the current user page", async () => {
+  const actor = { ...alice, workspaceId: "navigation-during-collection" };
+  const initial = await store.load(actor);
+  const saved = await store.execute(actor, { type: "addSearch", term: "Navegação", city: "Belém" }, initial.version);
+  const searchId = saved.state.searches[0].id;
+  const imported = await store.execute(actor, {
+    type: "importPlaces", searchId, places: [{ id: "navigation-place", name: "Novo", address: "Rua", category: "" }]
+  }, saved.version);
+  const settings = await store.execute(actor, { type: "navigate", page: "settings" }, saved.version);
+  expect(settings.version).toBe(imported.version);
+  expect(settings.state.page).toBe("settings");
+  const next = await store.execute(actor, {
+    type: "importPlaces", searchId, places: [{ id: "navigation-place-2", name: "Outro", address: "Rua", category: "" }]
+  }, imported.version);
+  expect((await store.load(actor)).state.page).toBe("settings");
+  const filtered = await store.execute(actor, { type: "setFilter", filter: { name: "searchFilter", value: "Novo" } }, saved.version);
+  expect(filtered.version).toBe(next.version);
+  expect(filtered.state.page).toBe("settings");
+  expect(filtered.state.searchFilter).toBe("Novo");
+  await expect(store.execute(actor, { type: "toggleFavorite", id: "navigation-place" }, saved.version))
+    .rejects.toMatchObject({ code: "VERSION_CONFLICT" });
+});
+
+test("Google request/response details persist for 30 days, isolate workspaces, and expire without removing receipts", async () => {
+  vi.stubEnv("MONGODB_URI", server.getUri());
+  vi.stubEnv("MONGODB_DB_NAME", "MAPS_TEST");
+  const actor = { ...alice, workspaceId: "google-details" };
+  const transport = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({
+    places: [{ id: "details-place", displayName: { text: "Empresa do response" }, websiteUri: "https://example.test" }],
+    nextPageToken: "private-page-token"
+  })).mockResolvedValueOnce(Response.json({
+    error: { code: 403, message: "Invalid private-api-key", status: "PERMISSION_DENIED" }
+  }, { status: 403 }));
+  const logged = new LoggedGoogleSearch(client, db, new GoogleTextSearchProvider("private-api-key", transport));
+  const request = {
+    requestId: randomUUID(), billingScope: randomUUID(), limit: 5, searchId: "details-search",
+    term: "Farmácia", city: "Belém", source: "direct" as const, pageToken: "private-input-token"
+  };
+  const started = Date.now();
+  await logged.search(actor, request);
+  const detailsCollection = db.collection<GoogleSearchDetailsDocument>("googleSearchDetails");
+  const details = await detailsCollection.findOne({ workspaceId: actor.workspaceId });
+  expect(details).not.toBeNull();
+  expect(details!.expiresAt.getTime()).toBeGreaterThanOrEqual(started + 30 * 86400_000);
+  expect(details!.expiresAt.getTime()).toBeLessThan(Date.now() + 30 * 86400_000 + 1000);
+  expect(details!.response).toMatchObject({ httpStatus: 200, body: { places: [{ id: "details-place", displayName: { text: "Empresa do response" } }] } });
+  expect(JSON.stringify(details)).not.toContain("private-api-key");
+  expect(JSON.stringify(details)).not.toContain("private-page-token");
+  expect(JSON.stringify(details)).not.toContain("private-input-token");
+  const current = vi.spyOn(auth, "currentActor").mockResolvedValue(null);
+  const read = () => getLogDetails(new Request("http://localhost:3000/api/v1/collection/logs/id"),
+    { params: Promise.resolve({ logId: details!._id }) });
+  expect((await read()).status).toBe(401);
+  current.mockResolvedValue(outsider);
+  expect((await read()).status).toBe(404);
+  current.mockResolvedValue(actor);
+  const response = await read();
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const body = await response.json();
+  expect(body.request.body).toMatchObject({ textQuery: "Farmácia em Belém", pageToken: "[REDACTED]" });
+  expect(body).not.toHaveProperty("workspaceId");
+  expect(body).not.toHaveProperty("_id");
+  await expect(logged.search(actor, { ...request, requestId: randomUUID() })).rejects.toMatchObject({ code: "GOOGLE_REQUEST_FAILED" });
+  const failed = await detailsCollection.findOne({ workspaceId: actor.workspaceId, "response.httpStatus": 403 });
+  expect(failed?.response?.body).toMatchObject({ error: { status: "PERMISSION_DENIED" } });
+  expect(JSON.stringify(failed)).not.toContain("private-api-key");
+  await detailsCollection.updateOne({ _id: details!._id }, { $set: { expiresAt: new Date(Date.now() - 1) } });
+  expect((await read()).status).toBe(404);
+  expect(await db.collection("googleSearchRequests").countDocuments({ workspaceId: actor.workspaceId })).toBe(2);
+  expect((await detailsCollection.indexes()).some((index) => index.expireAfterSeconds === 0)).toBe(true);
 });

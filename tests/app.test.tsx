@@ -80,6 +80,53 @@ test("React saves independent search tabs, closes without deleting and reopens s
   expect(screen.getByRole("heading", { name: "Farmácia" })).toBeInTheDocument();
 });
 
+test("saved search deletion requires confirmation, supports cancel and preserves collected data across remounts", async () => {
+  const { repository } = fixture();
+  const initial = createDemoState();
+  initial.page = "saved";
+  initial.favorites = ["demo-01"];
+  initial.comments["demo-01"] = [{ text: "Manter", createdAt: "2026-10-30" }];
+  repository.save(initial);
+  const user = userEvent.setup();
+  const view = render(<App repository={repository} />);
+  await user.click(screen.getByRole("button", { name: "Excluir busca Aparelho auditivo" }));
+  let dialog = screen.getByRole("dialog", { name: "Excluir busca salva" });
+  expect(dialog).toHaveTextContent("Estabelecimentos, favoritos");
+  await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+  expect(repository.load()?.searches).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "Excluir busca Aparelho auditivo" }));
+  dialog = screen.getByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Confirmar exclusão" }));
+  expect(await screen.findByText("Ainda não há buscas salvas")).toBeInTheDocument();
+  expect(repository.load()).toMatchObject({
+    searches: [], openTabs: [], activeSearchId: null, places: initial.places,
+    favorites: initial.favorites, comments: initial.comments
+  });
+  view.unmount();
+  render(<App repository={repository} />);
+  expect(screen.getByText("Ainda não há buscas salvas")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Favoritos" }));
+  expect(screen.getByText("Clínica Exemplo Centro")).toBeInTheDocument();
+});
+
+test("a failed deletion retains the confirmation and the saved search for retry", async () => {
+  const { repository } = fixture();
+  const initial = createDemoState();
+  initial.page = "saved";
+  repository.save(initial);
+  const user = userEvent.setup();
+  render(<App repository={repository} />);
+  await user.click(screen.getByRole("button", { name: "Excluir busca Aparelho auditivo" }));
+  const save = vi.spyOn(repository, "save").mockImplementation(() => { throw new Error("Falha de armazenamento"); });
+  const dialog = screen.getByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Confirmar exclusão" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("Falha de armazenamento");
+  expect(repository.load()?.searches).toHaveLength(1);
+  save.mockRestore();
+  await user.click(within(dialog).getByRole("button", { name: "Confirmar exclusão" }));
+  expect(await screen.findByText("Ainda não há buscas salvas")).toBeInTheDocument();
+});
+
 test("storage failure retains drafts, rolls back changes and retries without duplicate comments", async () => {
   const { repository } = fixture();
   const user = userEvent.setup();

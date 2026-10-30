@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { MongoServerError, type Db, type MongoClient } from "mongodb";
 import type { GoogleSearchResult } from "../../domain/google-search";
+import type { SavedSearch } from "../../domain/types";
 import { PortalError } from "../../application/portal-error";
 import { MongoPortalStore } from "./mongo-portal-store";
 import { GoogleTextSearchProvider } from "./google-places-provider";
@@ -64,11 +65,14 @@ export async function startCollectionJob(
   const session = client.startSession();
   try {
     await session.withTransaction(async () => {
+      const workspaces = db.collection<{ _id: string; data: { searches: SavedSearch[] }; updatedAt: Date }>("portalWorkspaces");
+      const workspace = await workspaces.findOne({ _id: actor.workspaceId }, { session });
+      const search = workspace?.data.searches.find((item) => item.id === searchId);
+      if (!search || search.demo) throw new PortalError(404, "SEARCH_NOT_FOUND", "Busca não encontrada.");
+      // Serializa o início da coleta com a exclusão da busca no agregado.
+      await workspaces.updateOne({ _id: actor.workspaceId }, { $set: { updatedAt: new Date() } }, { session });
       let cursor = await cursors.findOne({ _id: id }, { session });
       if (!cursor) {
-        const snapshot = await new MongoPortalStore(client, db).load(actor);
-        const search = snapshot.state.searches.find((item) => item.id === searchId);
-        if (!search) throw new PortalError(404, "SEARCH_NOT_FOUND", "Busca não encontrada.");
         if (latest || search.placeIds.length > 0) {
           throw new PortalError(409, "COLLECTION_CURSOR_UNAVAILABLE",
             "Esta busca antiga não possui continuação confiável salva. Não reiniciamos a consulta para evitar repetições. Crie uma nova busca para iniciar uma sequência paginada.");

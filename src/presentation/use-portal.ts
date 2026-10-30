@@ -96,13 +96,29 @@ export function usePortal(source: PortalRepository | PortalConnection) {
 
   const forceRefresh = useCallback(async () => {
     if (!remote) return;
-    try {
-      const state = await (source as PortalConnection).reload();
-      service.state = state;
-      setRevision((v) => v + 1);
-    } catch (error) {
-      setNotice({ message: errorMessage(error), error: true });
-    }
+    const result = queue.current.then(async () => {
+      try {
+        const state = await source.reload();
+        const current = confirmedState.current;
+        const searchIds = new Set(state.searches.map((search) => search.id));
+        const openTabs = current.openTabs.filter((id) => searchIds.has(id));
+        confirmedState.current = {
+          ...state,
+          page: current.page, mobileView: current.mobileView,
+          searchFilter: current.searchFilter, visibility: current.visibility, favoriteOnly: current.favoriteOnly,
+          openTabs,
+          activeSearchId: current.activeSearchId && searchIds.has(current.activeSearchId)
+            ? current.activeSearchId : openTabs.at(-1) ?? null
+        };
+        service.state = structuredClone(confirmedState.current);
+        for (const view of pendingViews.current) service.execute(view);
+        setRevision((v) => v + 1);
+      } catch (error) {
+        setNotice({ message: errorMessage(error), error: true });
+      }
+    });
+    queue.current = result;
+    await result;
   }, [remote, source, service]);
 
   return { service, state: service.state, notice, mutate, pending, remote, forceRefresh };
