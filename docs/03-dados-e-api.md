@@ -12,6 +12,12 @@ coleta real, ainda nao implementado. A interface atual funciona com:
 | `GET /api/v1/municipalities` | Catalogo de municipios IBGE normalizado, exige sessao; nao usa Google |
 | `POST /api/v1/portal` | `{ version, commandId, command }`, sem estado/autor/workspace do cliente |
 | `POST /api/v1/collection` | Consulta Google explicita, uma pagina temporaria; valida flag, chave, politicas e reserva mensal |
+| `POST/GET /api/v1/collection/run` | Inicia coleta paginada / lista os ultimos jobs de uma busca |
+| `GET /api/v1/collection/run/:jobId` | Progresso de um job do workspace |
+| `GET/PUT /api/v1/collection/config` | Limite de requisicoes por execucao |
+| `GET /api/v1/collection/quota` | Consumo mensal, saldo e limite por execucao |
+| `GET /api/v1/collection/logs` | Historico de consultas do workspace |
+| `GET /api/v1/collection/logs/:logId` | Request/response sanitizados durante 30 dias |
 | `GET /api/health` | Liveness sem banco |
 | `GET /api/ready` | Configuracao, ping Mongo e marcador de migracao |
 
@@ -28,11 +34,25 @@ somente `city` continuam compativeis; nao ha migracao automatica por nome.
 
 O catalogo vem de
 `https://servicodados.ibge.gov.br/api/v1/localidades/municipios?orderBy=nome`,
-com cache em memoria de 24 horas por processo e coalescencia de chamadas
-concorrentes. O navegador carrega o catalogo uma vez ao abrir o formulario
-e filtra localmente, sem requisicoes por tecla. O backend retorna erros
-explicitos se o IBGE falhar; nao usa catalogo inventado ou lista vazia de sucesso.
-Nao ha chave nem consumo de cota Google nesse fluxo.
+com timeout de 5 segundos, cache em memoria de 24 horas por processo e
+coalescencia de chamadas concorrentes. Em falha de rede, HTTP ou catalogo
+invalido/incompleto, preserva o ultimo catalogo valido ou usa a copia oficial
+versionada em `src/infrastructure/data/ibge-municipalities.json`. Essa reserva
+e cacheada por 5 minutos antes de tentar novamente a fonte principal.
+Falhas inesperadas continuam sendo propagadas.
+
+A resposta e `{ municipalities, source: "ibge" | "backup", updatedAt }`;
+`updatedAt` e a data de obtencao do catalogo, nao sua validade normativa.
+Quando usa reserva, o servidor registra `ibge_catalog_backup` e a interface
+exibe um aviso com a data, sem bloquear a selecao. A validacao de `addSearch`
+usa o mesmo mecanismo. Nao ha catalogo inventado, escolha automatica ou lista
+vazia com aparencia de sucesso. O navegador filtra localmente, sem chamadas
+por tecla. Nao ha chave nem consumo de cota Google nesse fluxo.
+
+`npm.cmd run municipalities:update` obtem novamente a fonte oficial e valida
+formato, pelo menos 5500 municipios, codigos unicos e as 27 UFs antes de
+substituir a copia. Essa copia deve ser versionada e publicada; nao depende
+de armazenamento gravavel ou de acesso ao IBGE durante o build/deploy.
 
 As respostas do portal sao `{ state, version }`; erros possuem `error`, `code`
 e identificador de requisicao. Todas as leituras sao locais, sem coleta.
@@ -64,8 +84,9 @@ IDs de buscas excluidas, e sao serializadas com os comandos do cliente.
 Conflitos comerciais retornam 409 sem sobrescrever dados. Repetir
 UUID/conteudo devolve estado atual sem repetir a alteracao; UUID com outro
 conteudo retorna 409. Corpos acima de 8 KiB sao rejeitados.
-Nao estao implementados paginacao, geoconsultas ou coleta dos contratos abaixo.
-Consulta Google e contadores separados nao gravam conteudo de provedor no agregado.
+Nao estao implementados paginacao local, geoconsultas ou coleta territorial
+dos contratos abaixo. A coleta Google importa dados no agregado e mantem
+jobs, cursor, orcamento e logs em colecoes separadas.
 Contrato e limites em [Google Places](09-google-places.md).
 Procedimentos em [Deploy na Vercel](07-deploy-vercel.md).
 

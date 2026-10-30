@@ -1,10 +1,10 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { CollectionPanel } from "../src/presentation/components/collection-panel";
 import type { Portal } from "../src/presentation/use-portal";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 const search = {
   id: "batch-search", term: "Teste", city: "Belém", demo: false, createdAt: "2026-10-30",
@@ -51,4 +51,55 @@ test("an exhausted search remains blocked after reopening without a paid request
   expect(await screen.findByText(/O Google não disponibilizou mais resultados/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Continuar coleta" })).not.toBeInTheDocument();
   expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+test("slow progress requests never overlap and unmount aborts polling without refreshing the portal", async () => {
+  vi.useFakeTimers();
+  const state = portal();
+  let release!: (response: Response) => void;
+  let signal: AbortSignal | undefined;
+  const fetch = vi.fn(async (url: string, options?: RequestInit) => {
+    if (url.endsWith("/quota")) return Response.json(quota);
+    if (url.includes("?searchId=")) return Response.json([{ id: "running", status: "running" }]);
+    signal = options?.signal ?? undefined;
+    return new Promise<Response>((resolve) => { release = resolve; });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const view = render(<CollectionPanel search={search} portal={state} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(fetch).toHaveBeenCalledTimes(3);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(signal?.aborted).toBe(false);
+  view.unmount();
+  expect(signal?.aborted).toBe(true);
+  await act(async () => { release(Response.json({ id: "running", status: "done", hasMore: false })); });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(state.forceRefresh).not.toHaveBeenCalled();
+});
+
+test("polling recovers from a progress error and stops when the job finishes", async () => {
+  vi.useFakeTimers();
+  const state = portal();
+  let polls = 0;
+  const fetch = vi.fn(async (url: string) => {
+    if (url.endsWith("/quota")) return Response.json(quota);
+    if (url.includes("?searchId=")) return Response.json([{ id: "running", status: "running" }]);
+    return ++polls === 1 ? new Response("", { status: 503 })
+      : Response.json({ id: "running", status: "done", hasMore: false });
+  });
+  vi.stubGlobal("fetch", fetch);
+  const view = render(<CollectionPanel search={search} portal={state} />);
+  await act(async () => {});
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(screen.getByRole("alert")).toHaveTextContent("Tentaremos novamente");
+  await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.getByText(/O Google não disponibilizou mais resultados/)).toBeInTheDocument();
+  expect(state.forceRefresh).toHaveBeenCalledTimes(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(polls).toBe(2);
+  view.unmount();
 });

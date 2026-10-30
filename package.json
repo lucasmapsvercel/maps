@@ -12,6 +12,7 @@
     "build": "next build",
     "test": "vitest run",
     "check": "tsc --noEmit",
+    "municipalities:update": "node --experimental-strip-types scripts/update-ibge-municipalities.ts",
     "db:migrate": "node --experimental-strip-types --env-file=.env.migrate scripts/migrate-mongo.ts",
     "test:integration": "vitest run tests/mongo.integration.test.ts"
   },

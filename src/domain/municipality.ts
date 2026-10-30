@@ -10,7 +10,13 @@ export const municipalitySchema = z.strictObject({
 });
 
 export type Municipality = z.infer<typeof municipalitySchema>;
-export const municipalitiesResponseSchema = z.object({ municipalities: z.array(municipalitySchema).min(1).max(10000) });
+export const municipalitiesResponseSchema = z.object({
+  municipalities: z.array(municipalitySchema).min(1).max(10000),
+  source: z.enum(["ibge", "backup"]),
+  updatedAt: z.iso.datetime()
+});
+
+export type MunicipalityCatalog = z.infer<typeof municipalitiesResponseSchema>;
 
 export function municipalityCity(municipality: Municipality) {
   return `${municipality.name}, ${municipality.stateName}, ${municipality.country}`;

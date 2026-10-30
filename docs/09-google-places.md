@@ -9,8 +9,9 @@
   atribuicoes; sem fotos, avaliacoes ou mapa JavaScript pago.
 - Cidade incluida no texto da consulta: nao ha filtro por poligono municipal,
   geocodificacao, grade ou garantia de pertencimento/cobertura do municipio.
-- Lista com atribuicao Google Maps e de terceiros; filtro textual local
-  nao faz novas chamadas.
+- O adaptador retorna atribuicoes; o filtro dos resultados salvos e local
+  e nao faz novas chamadas. O painel atual e o de coleta incremental;
+  a antiga tela isolada de consulta temporaria nao e mais usada.
 - Resposta HTTP `no-store`; a busca direta retorna dados temporarios. A coleta
   em segundo plano importa resultados no workspace MongoDB e o mapa Leaflet
   usa as coordenadas salvas.

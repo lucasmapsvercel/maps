@@ -74,16 +74,13 @@ export function usePortal(source: PortalRepository | PortalConnection) {
       try {
         const state = await source.execute(command);
         confirmedState.current = structuredClone(state);
-        pendingViews.current = pendingViews.current.filter((item) => item !== command);
-        service.state = state;
-        for (const view of pendingViews.current) service.execute(view);
         setNotice(message ? { message, error: false } : null);
         return true;
       } catch (error) {
-        pendingViews.current = pendingViews.current.filter((item) => item !== command);
         setNotice({ message: errorMessage(error), error: true });
         return false;
       } finally {
+        pendingViews.current = pendingViews.current.filter((item) => item !== command);
         service.state = structuredClone(confirmedState.current);
         for (const view of pendingViews.current) service.execute(view);
         setPending((value) => value - 1);

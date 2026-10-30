@@ -8,6 +8,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const belem = { ibgeCode: "1501402", name: "Belém", stateCode: "PA", stateName: "Pará", country: "Brasil" };
 const municipalities = [belem, { ...belem, ibgeCode: "2700805", stateCode: "AL", stateName: "Alagoas" }];
+const catalog = { municipalities, source: "ibge", updatedAt: "2026-10-30T00:00:00.000Z" };
 
 function portal(): Portal {
   return {
@@ -18,7 +19,7 @@ function portal(): Portal {
 
 test("typing a municipality is not confirmation; selecting a homonym persists its exact identity", async () => {
   const user = userEvent.setup();
-  const fetch = vi.fn().mockResolvedValue(Response.json({ municipalities }));
+  const fetch = vi.fn().mockResolvedValue(Response.json(catalog));
   vi.stubGlobal("fetch", fetch);
   const state = portal();
   const close = vi.fn();
@@ -48,7 +49,7 @@ test("typing a municipality is not confirmation; selecting a homonym persists it
 
 test("keyboard selection works and editing invalidates the previously selected municipality", async () => {
   const user = userEvent.setup();
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ municipalities })));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(catalog)));
   render(<SearchDialog portal={portal()} onClose={vi.fn()} />);
   const input = screen.getByRole("combobox");
   await waitFor(() => expect(input).toBeEnabled());
@@ -70,7 +71,7 @@ test("catalog errors are shown, retry loads suggestions and no default city is s
   const user = userEvent.setup();
   vi.stubGlobal("fetch", vi.fn()
     .mockResolvedValueOnce(Response.json({ error: "IBGE indisponível" }, { status: 502 }))
-    .mockResolvedValueOnce(Response.json({ municipalities })));
+    .mockResolvedValueOnce(Response.json(catalog)));
   render(<SearchDialog portal={portal()} onClose={vi.fn()} />);
   expect(await screen.findByRole("alert")).toHaveTextContent("IBGE indisponível");
   expect(screen.getByRole("combobox")).toHaveValue("");
@@ -80,4 +81,19 @@ test("catalog errors are shown, retry loads suggestions and no default city is s
   await user.type(screen.getByRole("combobox"), "belem pa");
   expect(screen.getAllByRole("option")).toHaveLength(1);
   expect(screen.getByRole("button", { name: /Salvar busca/ })).toBeDisabled();
+});
+
+test("backup catalog is disclosed without blocking municipality selection or saving a search", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ...catalog, source: "backup" })));
+  const state = portal();
+  render(<SearchDialog portal={state} onClose={vi.fn()} />);
+  expect(await screen.findByText(/Usando catálogo de reserva do IBGE/)).toBeInTheDocument();
+  await user.type(screen.getByLabelText("Termo de pesquisa"), "Farmácia");
+  await user.type(screen.getByRole("combobox"), "belem pa");
+  await user.click(screen.getByRole("option", { name: /Belém — PA/ }));
+  await user.click(screen.getByRole("button", { name: /Salvar busca/ }));
+  expect(state.mutate).toHaveBeenCalledWith({
+    type: "addSearch", term: "Farmácia", city: "Belém, Pará, Brasil", municipality: belem
+  }, expect.any(String));
 });

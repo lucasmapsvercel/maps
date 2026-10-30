@@ -21,7 +21,7 @@ import { GET as getLogs } from "../src/app/api/v1/collection/logs/route";
 import { GET as getLogDetails } from "../src/app/api/v1/collection/logs/[logId]/route";
 import { GoogleTextSearchProvider } from "../src/infrastructure/server/google-places-provider";
 import type { GoogleSearchDetailsDocument } from "../src/infrastructure/server/logged-google-search";
-import { ibgeMunicipalities } from "../src/infrastructure/server/ibge-municipalities";
+import { IbgeMunicipalities, ibgeMunicipalities } from "../src/infrastructure/server/ibge-municipalities";
 import { startCollectionJob, getCollectionJob, getQuotaUsage } from "../src/infrastructure/server/collection-runner";
 import { GET as getCollectionConfig, PUT as putCollectionConfig } from "../src/app/api/v1/collection/config/route";
 
@@ -660,7 +660,9 @@ test("new search HTTP API requires an IBGE selection and rejects unknown municip
   const actor = { ...alice, workspaceId: "municipality-validation" };
   vi.spyOn(auth, "currentActor").mockResolvedValue(actor);
   const municipality = { ibgeCode: "1501402", name: "Belém", stateCode: "PA" as const, stateName: "Pará", country: "Brasil" as const };
-  const catalog = vi.spyOn(ibgeMunicipalities, "list").mockResolvedValue([municipality]);
+  const offlineCatalog = new IbgeMunicipalities(vi.fn().mockRejectedValue(new Error("IBGE offline")));
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const catalog = vi.spyOn(ibgeMunicipalities, "list").mockImplementation(() => offlineCatalog.list());
   const initial = await store.load(actor);
   const send = (command: unknown) => POST(new Request("http://localhost:3000/api/v1/portal", {
     method: "POST", headers: { origin: "http://localhost:3000", "content-type": "application/json" },
@@ -675,4 +677,9 @@ test("new search HTTP API requires an IBGE selection and rejects unknown municip
   expect(invalid.status).toBe(400);
   expect(await invalid.json()).toMatchObject({ code: "MUNICIPALITY_NOT_FOUND" });
   expect((await store.load(actor)).state.searches).toEqual([]);
+  const valid = await send({ ...base, municipality: { ...municipality, name: "Nome adulterado" }, city: "Cidade arbitrária" });
+  expect(valid.status).toBe(200);
+  expect((await valid.json()).state.searches[0]).toMatchObject({ municipality, city: "Belém, Pará, Brasil" });
+  expect((await store.load(actor)).state.searches[0].municipality).toEqual(municipality);
+  expect(warning).toHaveBeenCalledWith(expect.stringContaining('"event":"ibge_catalog_backup"'));
 });

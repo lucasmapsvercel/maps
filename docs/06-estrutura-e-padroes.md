@@ -20,16 +20,25 @@ HTML gerado pelo framework e nao e versionado.
 | `src/infrastructure/server/mongo-portal-store.ts` | Unidade de trabalho transacional, versao, views e auditoria |
 | `src/infrastructure/server/mongo-schema.ts` | Migracao idempotente, validadores e indices |
 | `src/infrastructure/server/api.ts` | Autorizacao, origem, tamanho do corpo e respostas de erro |
-| `src/infrastructure/server/google-places-provider.ts` | Text Search Pro, uma pagina, respostas temporarias e erros sem retry |
+| `src/infrastructure/server/google-places-provider.ts` | Text Search (New), pagina de 20 resultados, captura sanitizada e erros sem retry |
 | `src/infrastructure/server/google-search-budget.ts` | Reserva mensal atomica e recibos sem conteudo do provedor |
+| `src/infrastructure/server/collection-runner.ts` | Jobs, cursor persistente, importacao de paginas e serializacao de progresso |
+| `src/infrastructure/server/ibge-municipalities.ts` | Catalogo oficial, cache e reserva validada para indisponibilidade do IBGE |
+| `src/infrastructure/ibge-catalog.ts` | Normalizacao e validacao do catalogo, compartilhadas com o atualizador |
 | `src/presentation` | Componentes TSX, formularios, fila de comandos e mensagens |
-| `scripts` | Migracao do schema no MongoDB Atlas, fora do build/deploy |
+| `scripts` | Migracao MongoDB e atualizacao da copia oficial IBGE, fora do build/deploy |
 | `tests` | Dominio, React, SSR, API, politica OAuth e integracao Mongo |
 
 As dependencias apontam para dentro. O dominio nao importa Next, React,
 driver Mongo ou variaveis de ambiente. `PortalService` pode executar com estado,
 relogio e gerador de IDs injetados sem persistencia; o adaptador Mongo coordena
 a transacao. A infraestrutura HTTP implementa `PortalConnection`.
+
+Os schemas de jobs e cota em `src/domain/collection-job.ts` e
+`src/domain/collection-config.ts` definem os contratos compartilhados entre
+servidor e painel. O painel usa polling sequencial, sem sobrepor leituras,
+e cancela leituras ao desmontar. A antiga tela de consulta temporaria foi
+removida por nao ter consumidores; o endpoint direto permanece compativel.
 
 `PortalRepository` sincrono e `LocalStorageRepository` permanecem para os
 testes legados do demonstrador, sem uso na pagina autenticada. Nao sao
@@ -50,28 +59,31 @@ substitutos silenciosos do banco quando o servidor falha.
 
 O UUID e valido por sete dias: mesma operacao/conteudo nao e aplicada novamente;
 conteudo diferente com a mesma chave e rejeitado. Nao ha retry silencioso de
-escritas apos perda de conexao. A versao global rejeita escritas concorrentes,
-inclusive de usuarios distintos; prioriza evitar perda de alteracoes.
+escritas apos perda de conexao. A versao global protege escritas comerciais;
+navegacao, abas e filtros alteram somente a view individual. Importacoes nao
+reescrevem a view, e a fila do cliente preserva navegacao durante atualizacoes.
 
 ## Limite deliberado desta etapa
 
 O backend do portal usa agregado Mongo por workspace (maximo 8 MiB), views
 separadas por usuario e API de comandos. E uma implementacao funcional de
-persistencia da interface atual, **nao** a implementacao normalizada de
-coleta/consulta paginada descrita como alvo em `03-dados-e-api.md`.
-Nao afirmar atendimento dos cenarios de carga, retencao de provedor ou coleta.
+persistencia da interface atual, **nao** a implementacao normalizada descrita
+como alvo em `03-dados-e-api.md`. A coleta Google ja pagina e importa no
+agregado, com jobs/cursor separados; a consulta local ainda nao e paginada.
+Nao afirmar atendimento dos cenarios de carga ou conformidade de retencao.
 
 Para volumes maiores e coleta real, migrar por versao para colecoes
 normalizadas/paginacao antes de elevar o limite. Nao introduzir provider
 snapshots em um agregado irrestrito. Mantem-se pendente a escolha de fonte,
 malha municipal licenciada, politica de retencao e orcamento para coleta
-municipal. A consulta Google explicita em lista e uma integracao distinta,
-sem persistencia dos resultados; veja [Google Places](09-google-places.md).
+municipal. A integracao Google atual persiste resultados e detalhes
+sanitizados de logs; veja [Google Places](09-google-places.md).
 
-Worker de coleta devera ser processo separado com fila duravel, leases,
-checkpoints e limites. Nao executar coleta longa em Route Handler ou
-promessa solta na Vercel. Nenhum worker vazio ou provedor ficticio e
-apresentado como integracao real nesta entrega.
+O runner atual inicia uma promessa em segundo plano no processo do servidor;
+nao e um worker duravel. Encerrar a instancia pode interromper jobs e manter
+o bloqueio do cursor. Antes de depender de coletas longas na Vercel, separar
+a execucao em fila duravel com leases e checkpoints. Persistir o cursor nao
+resolve sozinho a interrupcao de processos; essa limitacao permanece aberta.
 
 ## SOLID, leitura e verificacao
 

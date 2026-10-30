@@ -1,14 +1,14 @@
 # MAPS - Especificacao do projeto
 
-Status: portal Next.js com Google OAuth e persistencia MongoDB; coleta real bloqueada. Data: 2026-10-29.
+Status: portal Next.js com Google OAuth, persistencia MongoDB e coleta Google paginada, desativada por padrao. Data: 2026-10-30.
 
 Portal de pesquisa de estabelecimentos por termo e municipio, com buscas salvas em abas, mapa de resultados e acompanhamento comercial em MongoDB, no banco `MAPS`.
 
 ## Exemplo principal
 
 1. Criar uma busca com o termo **Aparelho Auditivo**.
-2. Selecionar **Belem, Para, Brasil**, confirmando o limite municipal.
-3. Solicitar a coleta nas regioes do municipio e acompanhar o progresso.
+2. Selecionar **Belem, Para, Brasil** no catalogo de municipios do IBGE.
+3. Confirmar a coleta paginada e acompanhar o progresso, sem garantia de cobertura territorial.
 4. Persistir os resultados permitidos, sem duplicar o mesmo estabelecimento.
 5. Reabrir a busca para consultar mapa e lista sem executar outra busca de estabelecimentos.
 6. Adicionar comentarios internos, favoritar, editar dados locais e ocultar resultados sem excluir registros.
@@ -25,7 +25,7 @@ Portal de pesquisa de estabelecimentos por termo e municipio, com buscas salvas 
 | [Estrutura e padroes](docs/06-estrutura-e-padroes.md) | Clean Code, Arquitetura Limpa, SOLID, OO e responsabilidades |
 | [Deploy na Vercel](docs/07-deploy-vercel.md) | Variaveis, deploy, migracao Atlas, testes e operacao |
 | [Credenciais para a Vercel](docs/08-credenciais-vercel.md) | Criacao de Google OAuth, segredo de sessao e usuarios MongoDB Atlas |
-| [Google Places](docs/09-google-places.md) | Lista sob demanda, chave de servidor, franquia compartilhada e limites |
+| [Google Places](docs/09-google-places.md) | Coleta incremental, limites de requisicoes, chave de servidor e logs |
 
 ## Condicoes essenciais
 
@@ -63,14 +63,36 @@ use `npm.cmd run dev` e abra a URL informada pelo Next.js (normalmente
 <http://127.0.0.1:3000>). Use HTTP, nao abertura direta por `file://`.
 
 Esta entrega implementa autenticacao, API persistente, transacoes, auditoria,
-controle de concorrencia e verificacoes de processo/banco. Google Places esta
-integrado para consulta explicita em lista, sem armazenamento dos resultados,
-mapa pago, worker ou varredura municipal. Criar busca nao consulta o Google;
-e necessario confirmar a consulta separadamente. A integracao fica bloqueada
+controle de concorrencia e verificacoes de processo/banco. O painel Google
+importa paginas de ate 20 resultados e persiste o cursor para continuar na
+proxima execucao. Configuracoes define o limite de requisicoes por execucao
+e exibe logs com request/response sanitizados, retidos por 30 dias.
+Nao ha mapa Google pago, varredura municipal nem worker duravel.
+Criar busca nao consulta o Google; e necessario confirmar a coleta.
+A integracao fica bloqueada
 ate configurar chave, politicas e parcela disponivel da franquia compartilhada.
 Veja [Google Places](docs/09-google-places.md).
 Os contratos normalizados e criterios de producao da especificacao continuam
 como alvo; veja o escopo efetivo em [Dados e API](docs/03-dados-e-api.md).
+
+### Catalogo municipal e indisponibilidade do IBGE
+
+O seletor consulta o IBGE e mantem cache de 24 horas. Se o servico falhar,
+usa o ultimo catalogo valido ou uma copia oficial incluida no deploy,
+com aviso na interface e registro no servidor. A reserva inclui 5571
+municipios das 27 UFs e nao consome Google Places. A validacao da busca
+no servidor usa o mesmo catalogo; nunca aceita somente um nome livre.
+
+Para atualizar a copia versionada a partir da fonte oficial:
+
+```powershell
+npm.cmd run municipalities:update
+```
+
+O comando valida formato, codigos unicos, quantidade minima e todas as UFs
+antes de substituir o arquivo. Revise e versione a atualizacao antes de
+publicar. O catalogo de reserva nao e atualizado automaticamente no deploy;
+veja os detalhes de cache e resposta em [Dados e API](docs/03-dados-e-api.md).
 
 ### Publicar na Vercel
 

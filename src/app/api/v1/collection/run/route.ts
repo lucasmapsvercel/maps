@@ -6,7 +6,7 @@ import { MongoPortalStore } from "../../../../../infrastructure/server/mongo-por
 import { validateCollectionRequest } from "../../../../../infrastructure/server/runtime-config";
 import { consumeMutationLimit } from "../../../../../infrastructure/server/rate-limit";
 import { secret } from "../../../../../infrastructure/server/config";
-import { startCollectionJob, listCollectionJobs } from "../../../../../infrastructure/server/collection-runner";
+import { startCollectionJob, listCollectionJobs, serializeCollectionJob } from "../../../../../infrastructure/server/collection-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -43,12 +43,6 @@ export function GET(request: Request) {
     if (!searchId) throw new PortalError(400, "MISSING_PARAM", "Parâmetro searchId obrigatório.");
     const db = await mongoDatabase();
     const jobs = await listCollectionJobs(searchId, actor.workspaceId, db);
-    return json(jobs.map((j) => ({
-      id: j._id, status: j.status, importedCount: j.importedCount, error: j.error, hasMore: j.hasMore,
-      requestsMade: j.requestsMade, maxRequestsPerRun: j.maxRequestsPerRun,
-      createdAt: j.createdAt.toISOString(),
-      startedAt: j.startedAt?.toISOString(),
-      finishedAt: j.finishedAt?.toISOString()
-    })));
+    return json(jobs.map(serializeCollectionJob));
   });
 }

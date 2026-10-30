@@ -1,117 +1,90 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
 import type { SavedSearch } from "../../domain/types";
 import type { Portal } from "../use-portal";
-
-type JobStatus = "pending" | "running" | "done" | "failed";
-
-interface JobInfo {
-  id: string;
-  status: JobStatus;
-  importedCount?: number;
-  error?: string;
-  hasMore?: boolean;
-  requestsMade?: number;
-  maxRequestsPerRun?: number;
-}
-
-interface QuotaInfo {
-  used: number;
-  limit: number;
-  remaining: number;
-  month: string;
-  maxRequestsPerRun: number;
-  resultsPerRequest: number;
-}
-
-const jobSchema = z.object({
-  id: z.string(),
-  status: z.enum(["pending", "running", "done", "failed"]),
-  importedCount: z.number().optional(),
-  error: z.string().optional(),
-  hasMore: z.boolean().optional(),
-  requestsMade: z.number().int().nonnegative().optional(),
-  maxRequestsPerRun: z.number().int().positive().optional()
-});
-
-const quotaSchema = z.object({
-  used: z.number(),
-  limit: z.number(),
-  remaining: z.number(),
-  month: z.string(),
-  maxRequestsPerRun: z.number().int().positive(),
-  resultsPerRequest: z.number().int().positive()
-});
+import { collectionJobSchema, type CollectionJobInfo } from "../../domain/collection-job";
+import {
+  collectionQuotaSchema, DEFAULT_COLLECTION_REQUESTS, GOOGLE_TEXT_SEARCH_PAGE_SIZE, type CollectionQuota
+} from "../../domain/collection-config";
 
 export function CollectionPanel({ search, portal }: { search: SavedSearch; portal: Portal }) {
-  const [quota, setQuota] = useState<QuotaInfo | null>(null);
+  const [quota, setQuota] = useState<CollectionQuota | null>(null);
   const [quotaError, setQuotaError] = useState("");
-  const [activeJob, setActiveJob] = useState<JobInfo | null>(null);
+  const [activeJob, setActiveJob] = useState<CollectionJobInfo | null>(null);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyFailed, setHistoryFailed] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingJobId = activeJob?.status === "pending" || activeJob?.status === "running" ? activeJob.id : null;
 
-  const fetchQuota = useCallback(async () => {
+  const fetchQuota = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/v1/collection/quota", { cache: "no-store" });
-      if (!res.ok) { setQuotaError("Não foi possível carregar a cota."); return; }
-      const data = quotaSchema.safeParse(await res.json());
-      if (data.success) { setQuota(data.data); setQuotaError(""); }
-      else setQuotaError("Resposta de cota inválida.");
-    } catch { setQuotaError("Não foi possível carregar a cota."); }
+      const res = await fetch("/api/v1/collection/quota", { cache: "no-store", signal });
+      if (!res.ok) throw new Error("Não foi possível carregar a cota.");
+      const data = collectionQuotaSchema.parse(await res.json());
+      if (!signal?.aborted) { setQuota(data); setQuotaError(""); }
+    } catch { if (!signal?.aborted) setQuotaError("Não foi possível carregar a cota."); }
   }, []);
 
-  useEffect(() => { void fetchQuota(); }, [fetchQuota]);
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    void fetchQuota(controller.signal);
+    return () => controller.abort();
+  }, [fetchQuota]);
+  useEffect(() => {
+    const controller = new AbortController();
     async function loadHistory() {
       try {
-        const res = await fetch(`/api/v1/collection/run?searchId=${encodeURIComponent(search.id)}`, { cache: "no-store" });
+        const res = await fetch(`/api/v1/collection/run?searchId=${encodeURIComponent(search.id)}`, {
+          cache: "no-store", signal: controller.signal
+        });
         if (!res.ok) throw new Error("Não foi possível carregar o progresso da coleta.");
-        const jobs = z.array(jobSchema).parse(await res.json());
-        if (cancelled) return;
-        const latest = jobs[0] ?? null;
-        setActiveJob(latest);
-        if (latest?.status === "pending" || latest?.status === "running") startPolling(latest.id);
+        const jobs = z.array(collectionJobSchema).parse(await res.json());
+        if (!controller.signal.aborted) setActiveJob(jobs[0] ?? null);
       } catch {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setHistoryFailed(true);
           setError("Não foi possível carregar o progresso da coleta. Reabra a busca para tentar novamente.");
         }
       } finally {
-        if (!cancelled) setHistoryLoading(false);
+        if (!controller.signal.aborted) setHistoryLoading(false);
       }
     }
     void loadHistory();
-    return () => { cancelled = true; };
+    return () => controller.abort();
   }, [search.id]);
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
-  function startPolling(jobId: string) {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
+  useEffect(() => {
+    if (!pollingJobId) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      let finished = false;
       try {
-        const res = await fetch(`/api/v1/collection/run/${jobId}`, { cache: "no-store" });
+        const res = await fetch(`/api/v1/collection/run/${pollingJobId}`, { cache: "no-store", signal: controller.signal });
         if (!res.ok) throw new Error("Não foi possível atualizar o progresso da coleta.");
-        const data = jobSchema.safeParse(await res.json());
-        if (!data.success) throw new Error("Resposta de progresso inválida.");
-        setError("");
-        const job = data.data;
-        setActiveJob(job);
-        if (job.status === "done" || job.status === "failed") {
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
+        const job = collectionJobSchema.parse(await res.json());
+        if (controller.signal.aborted) return;
+        const terminal = job.status === "done" || job.status === "failed";
+        if (terminal) {
           await portal.forceRefresh();
-          await fetchQuota();
+          await fetchQuota(controller.signal);
+        }
+        if (!controller.signal.aborted) {
+          setError("");
+          setActiveJob(job);
+          finished = terminal;
         }
       } catch {
-        setError("Não foi possível atualizar o progresso da coleta. Tentaremos novamente; não inicie outra consulta.");
+        if (!controller.signal.aborted) setError("Não foi possível atualizar o progresso da coleta. Tentaremos novamente; não inicie outra consulta.");
+      } finally {
+        if (!finished && !controller.signal.aborted) timer = setTimeout(poll, 2500);
       }
-    }, 2500);
-  }
+    }
+    timer = setTimeout(poll, 2500);
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [pollingJobId, portal.forceRefresh, fetchQuota]);
 
   async function handleStart() {
     setStarting(true);
@@ -127,9 +100,9 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
         const parsed = z.object({ error: z.string() }).safeParse(body);
         throw new Error(parsed.success ? parsed.data.error : `Falha HTTP ${res.status}.`);
       }
-      const { jobId } = body as { jobId: string };
-      setActiveJob({ id: jobId, status: "pending" });
-      startPolling(jobId);
+      const parsed = z.object({ jobId: z.string().min(1) }).safeParse(body);
+      if (!parsed.success) throw new Error("O servidor retornou uma confirmação de coleta inválida. Reabra a busca para verificar o progresso.");
+      setActiveJob({ id: parsed.data.jobId, status: "pending" });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao iniciar a coleta.");
     } finally {
@@ -138,13 +111,13 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
   }
 
   const alreadyCollected = search.placeIds.length;
-  const limit = quota?.maxRequestsPerRun ?? 100;
+  const limit = quota?.maxRequestsPerRun ?? DEFAULT_COLLECTION_REQUESTS;
   const exhausted = activeJob?.status === "done" && activeJob.hasMore === false;
-  const running = activeJob?.status === "pending" || activeJob?.status === "running";
+  const running = pollingJobId !== null;
   const quotaOk = quota && quota.remaining > 0;
   const canStart = quota !== null && !exhausted && !running && !starting && !historyLoading && !historyFailed;
 
-  const usedPct = quota ? Math.min(100, (quota.used / quota.limit) * 100) : 0;
+  const usedPct = quota?.limit ? Math.min(100, (quota.used / quota.limit) * 100) : 0;
 
   return (
     <section className="page-card" aria-label="Coleta de estabelecimentos">
@@ -154,11 +127,10 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
         <div>
           <strong>{alreadyCollected} estabelecimentos coletados</strong>
           <p>{exhausted ? "O Google não disponibilizou mais resultados. Nenhuma nova chamada será feita."
-            : `Cada execução realiza até ${limit} requisições, continuando de onde a anterior parou. Cada requisição solicita até ${quota?.resultsPerRequest ?? 20} resultados; a coleta para quando não houver mais páginas.`}</p>
+            : `Cada execução realiza até ${limit} requisições, continuando de onde a anterior parou. Cada requisição solicita até ${GOOGLE_TEXT_SEARCH_PAGE_SIZE} resultados; a coleta para quando não houver mais páginas.`}</p>
         </div>
       </div>
 
-      {/* Painel de cota mensal */}
       <div className="quota-panel" aria-label="Cota mensal de API">
         {quotaError ? (
           <p className="quota-error">{quotaError}</p>
@@ -191,7 +163,6 @@ export function CollectionPanel({ search, portal }: { search: SavedSearch; porta
         )}
       </div>
 
-      {/* Botão de ação */}
       {!exhausted && !running && (
         <div className="modal-actions">
           <button className="button button-primary" disabled={!canStart} onClick={handleStart}>

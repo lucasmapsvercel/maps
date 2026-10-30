@@ -18,14 +18,18 @@ interface Budget {
   count: number;
 }
 
+export function googleBudgetPeriod(scope: string, now: Date) {
+  const month = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit"
+  }).format(now);
+  return { month, id: createHash("sha256").update(`${scope}:${month}`).digest("hex") };
+}
+
 export class GoogleSearchBudget {
   constructor(private readonly client: MongoClient, private readonly db: Db) {}
 
   async reserve(actor: Actor, requestId: string, limit: number, scope: string, now = new Date(), context?: LogContext, collectionJobId?: string) {
-    const month = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit"
-    }).format(now);
-    const id = createHash("sha256").update(`${scope}:${month}`).digest("hex");
+    const { id } = googleBudgetPeriod(scope, now);
     const receiptId = createHash("sha256").update(`${actor.workspaceId}:${actor.userId}:${requestId}`).digest("hex");
     const session = this.client.startSession();
     try {
@@ -33,7 +37,7 @@ export class GoogleSearchBudget {
         const receipts = this.db.collection<GoogleSearchRequest>("googleSearchRequests");
         if (await receipts.findOne({ _id: receiptId }, { session })) {
           throw new PortalError(409, "GOOGLE_REQUEST_ALREADY_USED",
-            "Esta solicitação já foi utilizada. Os resultados não são armazenados; confirme uma nova consulta se necessário.");
+            "Esta solicitação já foi utilizada. Confirme uma nova consulta se necessário; a mesma solicitação não será executada novamente.");
         }
         const budgets = this.db.collection<Budget>("googleSearchBudgets");
         await budgets.updateOne({ _id: id }, { $setOnInsert: { count: 0 } }, { upsert: true, session });

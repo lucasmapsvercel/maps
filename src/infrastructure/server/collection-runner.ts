@@ -2,16 +2,17 @@ import { createHash, randomUUID } from "node:crypto";
 import { MongoServerError, type Db, type MongoClient } from "mongodb";
 import type { GoogleSearchResult } from "../../domain/google-search";
 import type { SavedSearch } from "../../domain/types";
+import type { CollectionJobInfo } from "../../domain/collection-job";
+import type { Actor } from "./auth";
 import { PortalError } from "../../application/portal-error";
 import { MongoPortalStore } from "./mongo-portal-store";
 import { GoogleTextSearchProvider } from "./google-places-provider";
 import { LoggedGoogleSearch } from "./logged-google-search";
 import { loadCollectionConfig } from "./collection-config";
-import { GOOGLE_TEXT_SEARCH_PAGE_SIZE } from "../../domain/collection-config";
+import { GOOGLE_TEXT_SEARCH_PAGE_SIZE, type CollectionQuota } from "../../domain/collection-config";
+import { googleBudgetPeriod } from "./google-search-budget";
 
-export type JobStatus = "pending" | "running" | "done" | "failed";
-
-export interface CollectionJob {
+export interface CollectionJob extends Omit<CollectionJobInfo, "id" | "createdAt" | "startedAt" | "finishedAt"> {
   _id: string;
   workspaceId: string;
   userId: string;
@@ -19,17 +20,21 @@ export interface CollectionJob {
   searchId: string;
   term: string;
   city: string;
-  status: JobStatus;
   maxRequestsPerRun: number;
   requestsMade: number;
   createdAt: Date;
   startedAt?: Date;
   finishedAt?: Date;
-  error?: string;
-  importedCount?: number;
-  hasMore?: boolean;
   /** Quantos lugares foram importados até o momento pelo job atual. */
   collectedSoFar?: number;
+}
+
+export function serializeCollectionJob(job: CollectionJob): CollectionJobInfo {
+  return {
+    id: job._id, status: job.status, importedCount: job.importedCount, error: job.error, hasMore: job.hasMore,
+    requestsMade: job.requestsMade, maxRequestsPerRun: job.maxRequestsPerRun,
+    createdAt: job.createdAt.toISOString(), startedAt: job.startedAt?.toISOString(), finishedAt: job.finishedAt?.toISOString()
+  };
 }
 
 interface CollectionCursor {
@@ -47,7 +52,7 @@ function cursorId(workspaceId: string, searchId: string) {
 }
 
 export async function startCollectionJob(
-  actor: { workspaceId: string; userId: string; name: string },
+  actor: Actor,
   searchId: string, term: string, city: string,
   apiKey: string, billingScope: string,
   client: MongoClient, db: Db
@@ -123,12 +128,8 @@ export async function listCollectionJobs(searchId: string, workspaceId: string, 
     .toArray();
 }
 
-export async function getQuotaUsage(billingScope: string, db: Db, now = new Date()) {
-  const { createHash } = await import("node:crypto");
-  const month = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit"
-  }).format(now);
-  const id = createHash("sha256").update(`${billingScope}:${month}`).digest("hex");
+export async function getQuotaUsage(billingScope: string, db: Db, now = new Date()): Promise<CollectionQuota> {
+  const { id, month } = googleBudgetPeriod(billingScope, now);
   const [budget, config] = await Promise.all([
     db.collection<{ _id: string; count: number }>("googleSearchBudgets").findOne({ _id: id }),
     loadCollectionConfig(db)
@@ -143,8 +144,8 @@ export async function getQuotaUsage(billingScope: string, db: Db, now = new Date
 }
 
 async function importPage(
-  actor: { workspaceId: string; userId: string; name: string },
-  places: Array<{ id: string; name: string; address: string; category?: string; latitude?: number; longitude?: number; phone?: string; website?: string }>,
+  actor: Actor,
+  places: GoogleSearchResult["places"],
   searchId: string,
   commandId: string,
   client: MongoClient,

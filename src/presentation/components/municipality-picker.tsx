@@ -10,6 +10,7 @@ export function MunicipalityPicker({ value, onChange }: { value: Municipality | 
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [backupDate, setBackupDate] = useState("");
   const [revision, setRevision] = useState(0);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -32,7 +33,10 @@ export function MunicipalityPicker({ value, onChange }: { value: Municipality | 
         }
         const parsed = municipalitiesResponseSchema.safeParse(body);
         if (!parsed.success) throw new Error("O catálogo de municípios está em formato inválido.");
-        if (!controller.signal.aborted) setMunicipalities(parsed.data.municipalities);
+        if (!controller.signal.aborted) {
+          setMunicipalities(parsed.data.municipalities);
+          setBackupDate(parsed.data.source === "backup" ? new Date(parsed.data.updatedAt).toLocaleDateString("pt-BR") : "");
+        }
       } catch (failure) {
         if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "Não foi possível carregar os municípios.");
       } finally {
@@ -78,6 +82,7 @@ export function MunicipalityPicker({ value, onChange }: { value: Municipality | 
       }} />
     <small id={`${id}-help`}>Selecione uma opção do IBGE. Digitar o nome sem selecionar não confirma o município.</small>
     {loading && <p role="status">Carregando municípios do IBGE…</p>}
+    {backupDate && <p role="status">IBGE indisponível no momento. Usando catálogo de reserva do IBGE obtido em {backupDate}. A seleção continua disponível.</p>}
     {error && <><p role="alert" className="collection-error">{error}</p>
       <button type="button" className="button button-quiet button-small" onClick={() => setRevision((value) => value + 1)}>Tentar carregar municípios novamente</button></>}
     {expanded && <>

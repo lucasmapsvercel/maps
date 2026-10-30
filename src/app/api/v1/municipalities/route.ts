@@ -5,5 +5,5 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export function GET(request: Request) {
-  return authenticatedApi(request, async () => json({ municipalities: await ibgeMunicipalities.list() }));
+  return authenticatedApi(request, async () => json(await ibgeMunicipalities.catalog()));
 }
